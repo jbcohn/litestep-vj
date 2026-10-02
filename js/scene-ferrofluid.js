@@ -1,13 +1,19 @@
 /**
  * VJ Visualizer - Scene 6: Ferrofluid & Inks
  * 
- * Inspired by:
- * 1. Hele-Shaw thin-film ferrofluid labyrinthine instability:
- *    - Deep obsidian black ferrofluid forming serpentine networks of lines,
- *      branching nodes, and dispersed droplets suspended over a single vibrant ink substrate.
- * 2. 3D magnetic Rosensweig fluid peaks & smooth concentric capillary waves:
- *    - Liquid mirror reflections with sharp GGX specular glints, continuous normals,
- *      and iridescent horizon rings.
+ * Macro Photography Ferrofluid Simulation:
+ * - Physics-Based Magnetic Dipole Attraction & Repulsion:
+ *   Mutual 1/r^4 dipole-dipole repulsion and harmonic magnetic confinement,
+ *   spontaneously organizing magnetized droplets into an authentic hexagonal Wigner lattice.
+ * - Single-Color Ink Substrate & Equipotential Contour Streamlines:
+ *   Captures authentic ferrofluid macro photography (orange/black, golden amber, or neon lime)
+ *   where nested equipotential lines wrap around each droplet mound and merge into
+ *   serpentine channels across the interstitial liquid floor.
+ * - Tactile 2.5D Liquid Surface:
+ *   Restrained vertical dimension (0.00 - 0.11 units) to eliminate messy vertical geometry,
+ *   producing smooth, glossy liquid domes and continuous fluid ridges.
+ * - Macro Studio Lighting:
+ *   Dual softbox specular reflections, signature ring-light glints, and Fresnel edge sheen.
  */
 
 class FerrofluidScene {
@@ -23,57 +29,141 @@ class FerrofluidScene {
         this.time = 0;
         this.isInitialized = false;
 
-        // Camera control: pitch & yaw (high tabletop Petri dish view)
-        this.pitch = 1.30; // ~74.5 deg high overhead perspective
+        // Camera control: overhead tabletop macro view (~76 deg pitch)
+        this.pitch = 1.33;
         this.yaw = 0.0;
-        this.targetPitch = 1.30;
+        this.targetPitch = 1.33;
         this.targetYaw = 0.0;
         this.isDragging = false;
         this.lastMouseX = 0;
         this.lastMouseY = 0;
 
-        // Palette & Mode
-        this.paletteIdx = 0;
-        this.magneticMode = 0; // 0 = Classic Labyrinth, 1 = Dense Cellular Maze, 2 = Concentric Corona, 3 = Twin Vortex
-        this.spikeGirth = 4.0; // Line thickness slider
+        // Magnetic Mode:
+        // 0 = Dipole Mounds & Equipotential Labyrinth (orange/black network)
+        // 1 = Central Magnetic Core & Rosensweig Honeycomb Web (golden amber)
+        // 2 = Circular Petri Dish & Radial Finger Tendrils (neon fluorescent lime)
+        this.magneticMode = 0;
+        this.spikeGirth = 4.0;
 
         // Drop shockwave state
         this.dropIntensity = 0.0;
         this.dropTime = 999.0;
 
-        // Single-Color Ink Palettes (Vibrant single ink background contrasting with obsidian black ferrofluid)
+        // -------------------------------------------------------------
+        // Magnetic Dipole Physics Particle System (44 Dipoles)
+        // -------------------------------------------------------------
+        this.numSpikes = 44;
+        this.spikes = [];
+        this._initDipoles();
+
+        // Single-Color Ink Palettes (Default: Vermillion Orange matching macro photo)
+        this.paletteIdx = 0;
         this.palettes = [
             {
-                name: "Amber Orange",
-                color: [1.00, 0.42, 0.02],   // Classic ferrofluid carrier fluid
-                glow:  [1.00, 0.65, 0.15]
+                name: "Vermillion Orange",
+                color: [1.00, 0.32, 0.02],   // Saturated orange ink from reference photo
+                glow:  [1.00, 0.16, 0.00]    // Deep vermillion depth
+            },
+            {
+                name: "Golden Amber",
+                color: [1.00, 0.72, 0.06],   // Radiant golden-yellow ink
+                glow:  [1.00, 0.48, 0.02]
+            },
+            {
+                name: "Neon Acid Lime",
+                color: [0.72, 1.00, 0.05],   // Fluorescent green/yellow
+                glow:  [0.45, 0.85, 0.02]
             },
             {
                 name: "Electric Cyan",
                 color: [0.00, 0.88, 1.00],   // Neon cyan ink
-                glow:  [0.35, 0.96, 1.00]
+                glow:  [0.00, 0.50, 0.85]
             },
             {
-                name: "Acid Lime",
-                color: [0.30, 0.95, 0.15],   // Radioactive emerald ink
-                glow:  [0.55, 1.00, 0.35]
-            },
-            {
-                name: "Hot Magenta",
-                color: [1.00, 0.14, 0.52],   // Laser magenta ink
-                glow:  [1.00, 0.45, 0.72]
+                name: "Laser Magenta",
+                color: [1.00, 0.12, 0.52],   // Hyper-saturated magenta ink
+                glow:  [0.75, 0.04, 0.32]
             },
             {
                 name: "Deep Ultraviolet",
-                color: [0.65, 0.18, 1.00],   // Bioluminescent purple ink
-                glow:  [0.82, 0.45, 1.00]
+                color: [0.65, 0.20, 1.00],   // Bioluminescent violet ink
+                glow:  [0.38, 0.06, 0.72]
             },
             {
                 name: "Prismatic Opal",
-                color: [0.82, 0.96, 0.84],   // Pearlescent green/gold liquid
-                glow:  [0.95, 0.98, 0.90]
+                color: [0.88, 0.95, 0.92],   // Pearlescent liquid
+                glow:  [0.65, 0.82, 0.78]
             }
         ];
+    }
+
+    _initDipoles() {
+        this.spikes = [];
+        // Mode 0 initial layout: 4 concentric hexagonal shells
+        var shells = [
+            { count: 6,  radius: 0.62, offset: 0.0 },
+            { count: 12, radius: 1.22, offset: Math.PI / 12 },
+            { count: 16, radius: 1.82, offset: 0.0 },
+            { count: 10, radius: 2.40, offset: Math.PI / 10 }
+        ];
+
+        shells.forEach((shell) => {
+            var step = (Math.PI * 2) / shell.count;
+            for (var i = 0; i < shell.count; i++) {
+                var angle = i * step + shell.offset;
+                var x = Math.cos(angle) * shell.radius;
+                var y = Math.sin(angle) * shell.radius;
+                this.spikes.push({
+                    x: x,
+                    y: y,
+                    vx: 0.0,
+                    vy: 0.0,
+                    fx: 0.0,
+                    fy: 0.0,
+                    targetR: shell.radius,
+                    baseAngle: angle
+                });
+            }
+        });
+    }
+
+    _reconfigureDipolesForMode() {
+        var shells;
+        if (this.magneticMode === 0) {
+            // Mode 0: Distributed hexagonal lattice for equipotential labyrinth
+            shells = [
+                { count: 6,  radius: 0.62 },
+                { count: 12, radius: 1.22 },
+                { count: 16, radius: 1.82 },
+                { count: 10, radius: 2.40 }
+            ];
+        } else if (this.magneticMode === 1) {
+            // Mode 1: Central Core & Honeycomb Ring (core is at center, dipoles surround it)
+            shells = [
+                { count: 8,  radius: 0.88 },
+                { count: 14, radius: 1.50 },
+                { count: 22, radius: 2.25 }
+            ];
+        } else {
+            // Mode 2: Petri Dish Radial Tendrils (dense central cluster + outer satellites)
+            shells = [
+                { count: 14, radius: 0.45 },
+                { count: 14, radius: 1.25 },
+                { count: 16, radius: 2.10 }
+            ];
+        }
+
+        var idx = 0;
+        shells.forEach((shell) => {
+            var step = (Math.PI * 2) / shell.count;
+            for (var i = 0; i < shell.count && idx < this.numSpikes; i++, idx++) {
+                this.spikes[idx].targetR = shell.radius;
+                this.spikes[idx].baseAngle = i * step;
+                // Add gentle nudge to guide migration
+                this.spikes[idx].vx += (Math.random() - 0.5) * 1.5;
+                this.spikes[idx].vy += (Math.random() - 0.5) * 1.5;
+            }
+        });
     }
 
     init(container) {
@@ -98,6 +188,12 @@ class FerrofluidScene {
         this.renderer.domElement.style.opacity = "0";
         this.container.appendChild(this.renderer.domElement);
 
+        // Pre-allocate spike uniform array
+        var spikeVectors = [];
+        for (var i = 0; i < this.numSpikes; i++) {
+            spikeVectors.push(new THREE.Vector2(this.spikes[i].x, this.spikes[i].y));
+        }
+
         this.material = new THREE.ShaderMaterial({
             vertexShader: this._vertexShader(),
             fragmentShader: this._fragmentShader(),
@@ -114,11 +210,12 @@ class FerrofluidScene {
                 u_drop_time: { value: 999.0 },
                 u_pitch: { value: this.pitch },
                 u_yaw: { value: this.yaw },
-                u_magnetic_mode: { value: 0 },
                 u_girth: { value: 1.0 },
+                u_mode: { value: 0.0 },
                 u_alpha: { value: 1.0 },
                 u_ink_color: { value: new THREE.Vector3(...this.palettes[0].color) },
-                u_ink_glow:  { value: new THREE.Vector3(...this.palettes[0].glow) }
+                u_ink_glow:  { value: new THREE.Vector3(...this.palettes[0].glow) },
+                u_spikes: { value: spikeVectors }
             },
             depthWrite: false,
             depthTest: false
@@ -148,7 +245,7 @@ class FerrofluidScene {
             this.lastMouseY = e.clientY;
 
             this.targetYaw += dx * 0.005;
-            this.targetPitch = Math.max(0.35, Math.min(1.48, this.targetPitch + dy * 0.005));
+            this.targetPitch = Math.max(0.80, Math.min(1.54, this.targetPitch + dy * 0.005));
         });
 
         window.addEventListener("mouseup", () => {
@@ -183,127 +280,155 @@ class FerrofluidScene {
             uniform float u_drop_time;
             uniform float u_pitch;
             uniform float u_yaw;
-            uniform int   u_magnetic_mode;
             uniform float u_girth;
+            uniform float u_mode;
             uniform float u_alpha;
 
             uniform vec3 u_ink_color;
             uniform vec3 u_ink_glow;
 
+            const int NUM_SPIKES = 44;
+            uniform vec2 u_spikes[44];
+
             #define PI 3.14159265359
 
-            // 2D Hash function
-            float hash21(vec2 p) {
-                p = fract(p * vec2(234.34, 435.345));
-                p += dot(p, p + 34.23);
-                return fract(p.x * p.y);
+            // Mode 1: Central Core Inner Labyrinth Maze
+            float innerLabyrinth(vec2 p) {
+                vec2 q = p * 14.0;
+                float l1 = sin(q.x + sin(q.y * 1.4));
+                float l2 = sin(q.y + cos(q.x * 1.4));
+                return smoothstep(0.32, 0.0, abs(l1 * l2));
             }
 
-            // Continuous Ferrofluid Labyrinth & Droplet Network
-            // Returns: x = ferrofluid density [0..1], y = gradient magnitude (meniscus edge)
-            vec2 getFerrofluidField(vec2 p) {
-                // Subtle fluid breathing flow
-                float flowRate = 0.08 + u_mids * 0.12;
-                vec2 flow = vec2(
-                    sin(p.y * 1.1 + u_time * flowRate),
-                    cos(p.x * 1.1 + u_time * flowRate)
-                ) * 0.22;
+            // Continuous Surface Evaluation
+            // Returns: x = ferrofluid mask [0..1], y = surface elevation [0..0.12], z = edge distance [0..1]
+            vec4 getFerrofluidSurface(vec2 p) {
+                float distCenter = length(p);
 
-                // Scale grid: higher tension tightens the labyrinth channels
-                float scale = 3.6 + u_tension * 1.2;
-                vec2 q = p * scale + flow;
-
-                // Mode Variations
-                float field = 0.0;
-                if (u_magnetic_mode == 0) {
-                    // Classic Hele-Shaw Labyrinthine Instability (Winding Serpentine Channels & Loops)
-                    float a1 = q.x;
-                    float a2 = q.x * 0.5 + q.y * 0.866025;
-                    float a3 = -q.x * 0.5 + q.y * 0.866025;
-                    
-                    float w1 = sin(a1 + sin(a2 * 1.2) * 0.65);
-                    float w2 = sin(a2 + sin(a3 * 1.2) * 0.65);
-                    float w3 = sin(a3 + sin(a1 * 1.2) * 0.65);
-                    field = (w1 + w2 + w3) / 3.0;
-
-                    // Varicose beading along ribbons (pinch-off nodes)
-                    field += sin(q.x * 3.8 + q.y * 2.6) * 0.14;
-
-                } else if (u_magnetic_mode == 1) {
-                    // Dense Cellular Droplets & Branching Mesh
-                    float w1 = sin(q.x + cos(q.y * 1.4));
-                    float w2 = sin(q.y + cos(q.x * 1.4));
-                    field = (w1 * w2) * 0.85;
-
-                } else if (u_magnetic_mode == 2) {
-                    // Concentric Corona Ripple Rings
-                    float r = length(p) * (5.0 + u_tension * 2.0);
-                    field = sin(r + sin(atan(p.y, p.x) * 6.0) * 0.6 - u_time * 0.5);
-
-                } else {
-                    // Twin Vortex Dipole Swirl
-                    vec2 p1 = p - vec2(-0.8, 0.0);
-                    vec2 p2 = p - vec2(0.8, 0.0);
-                    float r1 = length(p1) * 4.5 - atan(p1.y, p1.x) * 2.0;
-                    float r2 = length(p2) * 4.5 + atan(p2.y, p2.x) * 2.0;
-                    field = sin(r1) * 0.5 + sin(r2) * 0.5;
+                // Mode 1: Central circular magnetic core
+                if (u_mode > 0.5 && u_mode < 1.5) {
+                    float R_core = 0.44;
+                    if (distCenter < R_core + 0.06) {
+                        float rim = smoothstep(0.04, 0.0, abs(distCenter - R_core));
+                        float inCore = step(distCenter, R_core);
+                        float innerMaze = innerLabyrinth(p) * inCore;
+                        float coreMask = clamp(rim * 1.2 + innerMaze, 0.0, 1.0);
+                        float coreH = rim * (0.06 + u_sub * 0.03) + innerMaze * 0.035;
+                        return vec4(coreMask, coreH, rim, 1.0);
+                    }
                 }
 
-                // Line width modulation tied to Thickness slider + Bass pulsation
-                float baseWidth = 0.28 * u_girth * (1.0 + u_bass * 0.22);
-                float ribbonDist = abs(field);
-                float ribbon = smoothstep(baseWidth, baseWidth - 0.09, ribbonDist);
+                // -------------------------------------------------------------
+                // 1. MAGNETIC POTENTIAL & DIPOLE DISTANCE ACCUMULATION
+                // -------------------------------------------------------------
+                float psi = 0.0;
+                float d1 = 999.0;
+                float d2 = 999.0;
+                vec2 p1 = vec2(0.0);
+                vec2 p2 = vec2(0.0);
 
-                // Circular interstitial droplets in the negative gaps (Rayleigh-Plateau pinch-off)
-                vec2 cell = floor(q * 0.75);
-                vec2 f = fract(q * 0.75) - 0.5;
-                float h = hash21(cell);
-                float dotRadius = (0.10 + 0.16 * h) * u_girth;
-                float dotShape = smoothstep(dotRadius, dotRadius - 0.06, length(f));
-                float droplets = dotShape * step(0.38, h) * (1.0 - ribbon);
+                for (int i = 0; i < NUM_SPIKES; i++) {
+                    vec2 s = u_spikes[i];
+                    vec2 diff = p - s;
+                    float dSqr = dot(diff, diff);
+                    // Magnetic potential Psi ~ sum 1/(r^2 + r0^2)^0.75
+                    psi += 1.0 / pow(dSqr + 0.038, 0.75);
 
-                // Unified ferrofluid coverage density F
-                float F = clamp(ribbon + droplets, 0.0, 1.0);
+                    float d = sqrt(dSqr);
+                    if (d < d1) {
+                        d2 = d1;
+                        p2 = p1;
+                        d1 = d;
+                        p1 = s;
+                    } else if (d < d2) {
+                        d2 = d;
+                        p2 = s;
+                    }
+                }
 
-                // Meniscus edge detection (steep transition boundary)
-                float edge = smoothstep(0.05, 0.45, F) * smoothstep(0.95, 0.55, F);
+                // -------------------------------------------------------------
+                // 2. BULBOUS BLACK FERROFLUID DROPLET MOUNDS
+                // -------------------------------------------------------------
+                float R_mound = 0.165 * u_girth;
+                float domeDist = d1 / R_mound;
+                float moundShape = max(0.0, 1.0 - domeDist * domeDist);
+                // Restrained dome elevation (0.07 - 0.10 units)
+                float hMound = pow(moundShape, 1.5) * (0.072 + u_sub * 0.035 + u_tension * 0.02);
+                float moundMask = smoothstep(R_mound, R_mound - 0.025, d1);
 
-                return vec2(F, edge);
+                // -------------------------------------------------------------
+                // 3. NETWORK OF LINES: EQUIPOTENTIAL CONTOUR STREAMLINES
+                // -------------------------------------------------------------
+                // Natural log of potential creates uniform concentric spacing around dipoles
+                // that naturally merge into saddle-point serpentine channels between mounds.
+                float ringFreq = 3.65;
+                float theta = ringFreq * log(max(0.001, psi));
+                float ringWave = sin(theta);
+
+                // Line thickness controlled by slider and bass
+                float lineThresh = 0.62 - 0.20 * clamp(u_girth - 1.0, -0.6, 0.8);
+                float lineMask = smoothstep(lineThresh - 0.12, lineThresh + 0.04, ringWave);
+
+                // Fade lines gracefully near outer boundary
+                float boundaryFade = smoothstep(2.7, 2.2, distCenter);
+                lineMask *= boundaryFade;
+
+                // Tactile fluid ridge elevation for contour lines
+                float hLine = lineMask * (0.018 + u_bass * 0.009);
+
+                // -------------------------------------------------------------
+                // 4. MODE 2: PETRI DISH RADIAL TENDRILS
+                // -------------------------------------------------------------
+                float hTendril = 0.0;
+                float tendrilMask = 0.0;
+                if (u_mode > 1.5) {
+                    float angle = atan(p.y, p.x);
+                    float fingerNoise = sin(angle * 12.0 + sin(distCenter * 7.5 - u_time * 0.4) * 1.6);
+                    float fingers = smoothstep(0.18, 0.88, fingerNoise) * smoothstep(0.4, 1.1, distCenter) * smoothstep(2.5, 1.8, distCenter);
+                    tendrilMask = fingers;
+                    hTendril = fingers * 0.022;
+
+                    // Glass petri dish rim
+                    float dishRim = smoothstep(0.04, 0.0, abs(distCenter - 2.45));
+                    hTendril += dishRim * 0.04;
+                    tendrilMask = max(tendrilMask, dishRim);
+                }
+
+                // -------------------------------------------------------------
+                // 5. COMBINE FLUID MASK & ELEVATION
+                // -------------------------------------------------------------
+                float ferroMask = clamp(moundMask + lineMask + tendrilMask, 0.0, 1.0);
+                float totalH = hMound + hLine + hTendril;
+
+                // Contact edge distance for meniscus shading
+                float edgeD = min(abs(d1 - R_mound), abs(ringWave - lineThresh));
+
+                return vec4(ferroMask, totalH, edgeD, 0.0);
             }
 
-            // Continuous Surface Elevation h(x, z)
+            // Continuous Elevation Function with Capillary Waves & Drop Shockwave
             float getElevation(vec2 pos) {
                 float distCenter = length(pos);
-                vec2 ferro = getFerrofluidField(pos);
-                float F = ferro.x;
+                vec4 f = getFerrofluidSurface(pos);
+                float baseH = f.y;
 
-                // 1. Viscous black ferrofluid standing ridge above the ink floor
-                // Elegant 2.5D embossed liquid relief (0.04 - 0.10 units)
-                float ridgeProfile = F * F * (3.0 - 2.0 * F);
-                float hRidge = ridgeProfile * (0.045 + u_sub * 0.065 + u_tension * 0.025);
+                // Subtle capillary ripples on liquid substrate
+                float capWave = sin(distCenter * 15.0 - u_time * 4.8) * (0.002 + u_highs * 0.006) * exp(-distCenter * 0.28);
 
-                // 2. Rosensweig liquid beading along crests under bass
-                // Gentle liquid nodes rather than tall towers
-                float crestFactor = max(0.0, F - 0.65) / 0.35;
-                float needleSpike = pow(crestFactor, 2.5) * (0.02 + u_sub * 0.08);
-
-                // 3. Smooth Concentric Capillary Waves spreading across the liquid floor
-                float capWave = sin(distCenter * 14.0 - u_time * 5.0) * (0.003 + u_highs * 0.008) * exp(-distCenter * 0.25);
-
-                // 4. Musical Drop Shockwave Ring
+                // Musical Drop Shockwave Ring
                 float shockwave = 0.0;
-                if (u_drop_time >= 0.0 && u_drop_time < 3.0) {
-                    float waveFront = u_drop_time * 3.6;
+                if (u_drop_time >= 0.0 && u_drop_time < 3.2) {
+                    float waveFront = u_drop_time * 3.5;
                     float delta = distCenter - waveFront;
-                    shockwave = sin(delta * 12.0) * exp(-delta * delta * 2.5) * exp(-u_drop_time * 1.5) * (u_drop * 0.035);
+                    shockwave = sin(delta * 12.0) * exp(-delta * delta * 2.8) * exp(-u_drop_time * 1.4) * (u_drop * 0.028);
                 }
 
-                return hRidge + needleSpike + capWave + shockwave;
+                return baseH + capWave + shockwave;
             }
 
-            // Normal Estimation via Central Differences
+            // Analytical / Central-Differences Normal
             vec3 getNormal(vec2 p, float h) {
-                const vec2 eps = vec2(0.008, 0.0);
+                const vec2 eps = vec2(0.006, 0.0);
                 float hR = getElevation(p + eps.xy);
                 float hL = getElevation(p - eps.xy);
                 float hU = getElevation(p + eps.yx);
@@ -314,28 +439,28 @@ class FerrofluidScene {
             void main() {
                 vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
 
-                // Camera Setup: High Tabletop / Hele-Shaw View
-                float camDist = 4.0;
+                // Tabletop Macro Camera Setup (~76 deg overhead angle)
+                float camDist = 3.9;
                 float pitch = u_pitch;
-                float yaw = u_yaw + u_time * 0.03; // Gentle serene turntable drift
+                float yaw = u_yaw + u_time * 0.022; // Gentle macro turntable drift
 
                 vec3 ro = vec3(camDist * sin(yaw) * cos(pitch), camDist * sin(pitch), -camDist * cos(yaw) * cos(pitch));
-                vec3 target = vec3(0.0, 0.05, 0.0);
+                vec3 target = vec3(0.0, 0.03, 0.0);
 
                 vec3 fwd = normalize(target - ro);
                 vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), fwd));
                 vec3 up = cross(fwd, right);
-                vec3 rd = normalize(uv.x * right + uv.y * up + 1.65 * fwd);
+                vec3 rd = normalize(uv.x * right + uv.y * up + 1.70 * fwd);
 
                 // Raymarch Heightfield Surface with Binary Refinement
-                float t = 1.2;
-                float tMax = 7.5;
+                float t = 1.3;
+                float tMax = 7.0;
                 vec3 p = ro;
                 bool hit = false;
                 float finalH = 0.0;
                 float dt = 0.0;
 
-                for (int i = 0; i < 48; i++) {
+                for (int i = 0; i < 38; i++) {
                     p = ro + rd * t;
                     float h = getElevation(p.xz);
                     if (p.y <= h) {
@@ -343,12 +468,12 @@ class FerrofluidScene {
                         break;
                     }
                     float dY = p.y - h;
-                    dt = max(0.025, dY * 0.85);
+                    dt = max(0.018, dY * 0.88);
                     t += dt;
                     if (t > tMax) break;
                 }
 
-                // Sub-pixel Binary Refinement for silky-smooth, anti-aliased surface normals
+                // Sub-pixel Binary Refinement
                 if (hit) {
                     float tA = t - dt;
                     float tB = t;
@@ -366,93 +491,98 @@ class FerrofluidScene {
                     finalH = getElevation(p.xz);
                 }
 
-                // Background Void: Deep studio vignette
-                vec3 bgColor = mix(vec3(0.015, 0.02, 0.03), vec3(0.005, 0.008, 0.012), length(uv));
+                // Deep Dark Studio Macro Vignette
+                vec3 bgColor = mix(vec3(0.014, 0.016, 0.020), vec3(0.005, 0.006, 0.008), length(uv) * 1.1);
 
                 if (!hit) {
                     gl_FragColor = vec4(bgColor, u_alpha);
                     return;
                 }
 
-                // Normal & View Vector
+                // Surface Normal & View Vector
                 vec3 N = getNormal(p.xz, finalH);
                 vec3 V = -rd;
 
-                // Evaluate Ferrofluid & Ink Distribution at hit location
-                vec2 ferro = getFerrofluidField(p.xz);
-                float F = ferro.x;
-                float edge = ferro.y;
+                // Evaluate Ferrofluid Mask & Edge Meniscus
+                vec4 fData = getFerrofluidSurface(p.xz);
+                float isFerro = fData.x;
+                float edgeD = fData.z;
 
                 // -------------------------------------------------------------
-                // 1. MATERIAL DIFFERENTIATION (Black Ferrofluid vs. Single Ink)
+                // 1. MATERIAL ALBEDO: OBSIDIAN FERROFLUID & SINGLE-COLOR INK
                 // -------------------------------------------------------------
-                // Jet-black obsidian ferrofluid albedo:
-                vec3 ferroColor = vec3(0.012, 0.014, 0.018);
+                // Deep obsidian magnetite black
+                vec3 ferroColor = vec3(0.012, 0.013, 0.016);
 
-                // Saturated single-color ink substrate (Amber Orange as in photo):
+                // Vibrant Single-Color Ink Substrate
                 vec3 inkBase = u_ink_color;
-                // Subsurface translucency in the ink floor
-                vec3 inkLit  = mix(inkBase * 0.85, u_ink_glow, max(0.0, N.y) * 0.65);
+                // Subsurface optical depth gradient
+                float rDist = length(p.xz);
+                vec3 inkFloor = mix(u_ink_glow, inkBase, clamp(edgeD * 5.0, 0.0, 1.0));
 
-                // Meniscus Contact Shadow: Subtle dark border where black fluid meets ink
-                inkLit *= mix(0.55, 1.0, 1.0 - edge * 0.75);
+                // Meniscus Contact Border: Dark liquid rim where black fluid touches ink
+                float meniscus = smoothstep(0.05, 0.008, edgeD);
+                inkFloor = mix(inkFloor, inkBase * 0.45, meniscus * (1.0 - isFerro));
 
-                // Blend Albedo based on ferrofluid coverage F
-                float isFerro = smoothstep(0.35, 0.65, F);
-                vec3 albedo = mix(inkLit, ferroColor, isFerro);
+                // Blended Surface Albedo
+                vec3 albedo = mix(inkFloor, ferroColor, isFerro);
 
                 // -------------------------------------------------------------
-                // 2. LIGHTING RIG & GGX LIQUID SPECULAR
+                // 2. MACRO STUDIO LIGHTING: DUAL SOFTBOXES & RING-LIGHT
                 // -------------------------------------------------------------
-                // Key Light: Overhead photographic softbox
-                vec3 lKey = normalize(vec3(0.5, 2.2, -0.6));
-                float diffKey = max(0.0, dot(N, lKey));
-                vec3 hKey = normalize(lKey + V);
-                float NdotH = max(0.0, dot(N, hKey));
-                // High exponent for razor-sharp liquid mirror sheen
-                float specKey = pow(NdotH, 96.0);
+                // Key Light: Overhead photographic softbox 1
+                vec3 lKey1 = normalize(vec3(0.5, 2.2, -0.6));
+                float diffKey1 = max(0.0, dot(N, lKey1));
+                vec3 hKey1 = normalize(lKey1 + V);
+                float specSoft1 = pow(max(0.0, dot(N, hKey1)), 36.0);
+                float specSharp1 = pow(max(0.0, dot(N, hKey1)), 128.0);
 
-                // Rim Light: Backlight grazing edges to silhouette spikes and fluid ridges
-                vec3 lRim = normalize(vec3(-0.7, 1.4, 1.1));
-                float diffRim = max(0.0, dot(N, lRim));
-                vec3 hRim = normalize(lRim + V);
-                float specRim = pow(max(0.0, dot(N, hRim)), 48.0);
+                // Fill Light: Softbox 2
+                vec3 lFill2 = normalize(vec3(-0.7, 1.8, 0.5));
+                float diffFill2 = max(0.0, dot(N, lFill2));
+                vec3 hFill2 = normalize(lFill2 + V);
+                float specFill2 = pow(max(0.0, dot(N, hFill2)), 64.0);
 
                 // Ambient Sky Diffuse
-                float diffAmb = 0.45 + 0.55 * max(0.0, N.y);
+                float diffAmb = 0.52 + 0.48 * max(0.0, N.y);
 
-                // Fresnel Glancing Angle Reflection
+                // Reflected Ray
+                vec3 R = reflect(-V, N);
+
+                // Signature Macro Photography Studio Ring-Light Reflection
+                // Produces crisp circular ring glints on droplet crests and contour ridges
+                float ringAngle = acos(clamp(R.y, -1.0, 1.0));
+                float ringGlance = smoothstep(0.050, 0.0, abs(ringAngle - 0.38));
+                float ringLight = ringGlance * 2.6 * (0.85 + u_highs * 0.5);
+
+                // Fresnel Glancing Sheen
                 float NdotV = max(0.0, dot(N, V));
-                float fresnel = pow(1.0 - NdotV, 4.0);
+                float fresnel = pow(1.0 - NdotV, 3.8);
+                vec3 fresnelSheen = mix(vec3(1.0, 0.98, 0.95), u_ink_color * 1.2, 0.25);
 
-                // Horizon Capillary Wave Reflections (Referencing Image 1)
-                float distCenter = length(p.xz);
-                vec3 horizonGlow = u_ink_glow * (0.3 + 0.7 * sin(distCenter * 14.0 - u_time * 4.0)) * smoothstep(2.0, 4.5, distCenter);
+                // Ambient Occlusion in Valleys
+                float ao = clamp(1.0 - meniscus * 0.35, 0.65, 1.0);
 
-                // Thin-film iridescent sheen for glancing edges
-                vec3 iridescence = 0.5 + 0.5 * cos(fresnel * 6.28318 * vec3(1.0, 1.25, 1.5) + vec3(0.0, 1.1, 2.2));
-                vec3 specColor = mix(vec3(1.0, 0.98, 0.95), iridescence, 0.45);
+                // Composite Shading Model
+                vec3 col = albedo * (diffKey1 * 0.70 + diffFill2 * 0.40 + diffAmb * 0.55) * ao;
 
-                // Ambient Occlusion
-                float ao = clamp(1.0 - edge * 0.40, 0.60, 1.0);
+                // Add Glossy Specular Highlights (both on obsidian fluid and ink surface)
+                col += vec3(1.0, 0.98, 0.94) * (specSoft1 * 0.35 + specSharp1 * 1.5 + specFill2 * 0.45);
 
-                // Composite Shading
-                vec3 col = albedo * (diffKey * 0.75 + diffAmb * 0.55 + diffRim * 0.3) * ao;
-                // Gleaming liquid specular highlights
-                col += specColor * (specKey * 1.8 + specRim * 1.2) * (0.9 + u_highs * 0.7);
-                // Fresnel rim reflection
-                col += iridescence * fresnel * (isFerro > 0.5 ? 0.40 : 0.20);
-                // Distant wave horizon sheen
-                col += horizonGlow * fresnel * 0.5;
+                // Add Signature Macro Ring-Light Reflection
+                col += vec3(1.0, 0.99, 0.95) * ringLight * (isFerro > 0.4 ? 1.0 : 0.35);
 
-                // Drop Shockwave Flash Luminescence
-                if (u_drop_time >= 0.0 && u_drop_time < 0.65) {
-                    col += vec3(1.0, 0.96, 0.90) * exp(-u_drop_time * 5.0) * (u_drop * 0.55);
+                // Add Fresnel Glancing Sheen
+                col += fresnelSheen * fresnel * (isFerro > 0.5 ? 0.32 : 0.18);
+
+                // Musical Drop Shockwave Luminescence
+                if (u_drop_time >= 0.0 && u_drop_time < 0.60) {
+                    col += vec3(1.0, 0.96, 0.90) * exp(-u_drop_time * 5.0) * (u_drop * 0.50);
                 }
 
                 // Vignette & Distance Fog
                 float fogDist = length(p - ro);
-                float fog = smoothstep(5.5, 11.0, fogDist);
+                float fog = smoothstep(5.4, 9.5, fogDist);
                 col = mix(col, bgColor, fog);
 
                 gl_FragColor = vec4(col, u_alpha);
@@ -466,6 +596,76 @@ class FerrofluidScene {
         this.material.uniforms.u_resolution.value.set(width, height);
     }
 
+    updatePhysics(dt, audio) {
+        var sub = audio ? audio.sub : 0.0;
+        var bass = audio ? audio.bass : 0.0;
+        var tension = audio ? audio.tension : 0.0;
+        var isBeat = audio ? audio.isBeat : false;
+
+        // Radial magnetic confinement pulls dipoles to concentric equilibrium shells
+        var kCenter = 4.2 + sub * 3.8 + tension * 2.8;
+        // Mutual 1/r^4 dipole-dipole repulsion
+        var kRep = 0.52 + bass * 0.28;
+
+        for (var i = 0; i < this.numSpikes; i++) {
+            var pA = this.spikes[i];
+
+            // 1. Magnetic Confinement Force (Harmonic radial trap to target shell)
+            var curR = Math.hypot(pA.x, pA.y);
+            var radialForce = -kCenter * (curR - pA.targetR);
+            var ang = Math.atan2(pA.y, pA.x);
+            pA.fx = Math.cos(ang) * radialForce;
+            pA.fy = Math.sin(ang) * radialForce;
+
+            // Angular restorative spring maintaining ordered hexagonal crystal
+            var dAng = (pA.baseAngle - ang + Math.PI) % (Math.PI * 2) - Math.PI;
+            pA.fx += -Math.sin(ang) * dAng * 2.2 * curR;
+            pA.fy += Math.cos(ang) * dAng * 2.2 * curR;
+
+            // 2. Dipole-Dipole Repulsion between every pair (F ~ 1 / r^4)
+            for (var j = i + 1; j < this.numSpikes; j++) {
+                var pB = this.spikes[j];
+                var dx = pA.x - pB.x;
+                var dy = pA.y - pB.y;
+                var d2 = dx * dx + dy * dy + 0.08;
+                var d = Math.sqrt(d2);
+                var fRep = kRep / (d2 * d2);
+                var nx = dx / d, ny = dy / d;
+                pA.fx += nx * fRep;
+                pA.fy += ny * fRep;
+                pB.fx -= nx * fRep;
+                pB.fy -= ny * fRep;
+            }
+
+            // Beat perturbation / Brownian fluid agitation
+            if (isBeat) {
+                pA.fx += (Math.random() - 0.5) * 8.0 * (0.3 + sub);
+                pA.fy += (Math.random() - 0.5) * 8.0 * (0.3 + sub);
+            }
+        }
+
+        // Numerical integration with viscous fluid damping
+        var substeps = 2;
+        var subDt = Math.min(dt, 0.033) / substeps;
+        for (var step = 0; step < substeps; step++) {
+            for (var i = 0; i < this.numSpikes; i++) {
+                var p = this.spikes[i];
+                p.vx = (p.vx + p.fx * subDt) * 0.88; // Viscous liquid damping
+                p.vy = (p.vy + p.fy * subDt) * 0.88;
+                p.x += p.vx * subDt;
+                p.y += p.vy * subDt;
+            }
+        }
+
+        // Update Shader Uniforms
+        if (this.material && this.material.uniforms && this.material.uniforms.u_spikes) {
+            var vecList = this.material.uniforms.u_spikes.value;
+            for (var i = 0; i < this.numSpikes; i++) {
+                vecList[i].set(this.spikes[i].x, this.spikes[i].y);
+            }
+        }
+    }
+
     update(dt, audio, isVisible) {
         if (!this.isInitialized || !isVisible) return;
 
@@ -475,12 +675,15 @@ class FerrofluidScene {
         this.pitch += (this.targetPitch - this.pitch) * 0.12;
         this.yaw   += (this.targetYaw - this.yaw) * 0.12;
 
+        // Update Dipole Attraction & Repulsion Physics
+        this.updatePhysics(dt, audio);
+
         // Drop Shockwave Tracker
         if (this.dropTime < 5.0) {
             this.dropTime += dt;
         }
 
-        // Smooth Uniform Updates
+        // Uniform Updates
         var u = this.material.uniforms;
         u.u_time.value = this.time;
         u.u_sub.value = audio ? audio.sub : 0.0;
@@ -493,8 +696,8 @@ class FerrofluidScene {
         u.u_drop_time.value = this.dropTime;
         u.u_pitch.value = this.pitch;
         u.u_yaw.value = this.yaw;
-        u.u_magnetic_mode.value = this.magneticMode;
         u.u_girth.value = this.spikeGirth / 4.0;
+        u.u_mode.value = this.magneticMode;
     }
 
     render(alpha) {
@@ -514,23 +717,39 @@ class FerrofluidScene {
     triggerDropShockwave() {
         this.dropTime = 0.0;
         this.dropIntensity = 1.0;
+
+        // Radial blast impulse flinging dipoles outward on drop
+        for (var i = 0; i < this.numSpikes; i++) {
+            var p = this.spikes[i];
+            var ang = Math.atan2(p.y, p.x);
+            p.vx += Math.cos(ang) * 5.5;
+            p.vy += Math.sin(ang) * 5.5;
+        }
     }
 
     mutate() {
-        // Cycle single-color ink palette and magnetic formation pattern
+        // Cycle single-color ink palette
         this.paletteIdx = (this.paletteIdx + 1) % this.palettes.length;
-        this.magneticMode = (this.magneticMode + 1) % 4;
-
         var pal = this.palettes[this.paletteIdx];
         if (this.material && this.material.uniforms) {
             this.material.uniforms.u_ink_color.value.set(...pal.color);
             this.material.uniforms.u_ink_glow.value.set(...pal.glow);
         }
+
+        // Agitate particles gently
+        for (var i = 0; i < this.numSpikes; i++) {
+            this.spikes[i].vx += (Math.random() - 0.5) * 3.5;
+            this.spikes[i].vy += (Math.random() - 0.5) * 3.5;
+        }
     }
 
     randomizeGeometry() {
-        this.magneticMode = Math.floor(Math.random() * 4);
-        this.mutate();
+        // Cycle magnetic mode (0: Labyrinth & Contours, 1: Core & Honeycomb, 2: Petri Dish Tendrils)
+        this.magneticMode = (this.magneticMode + 1) % 3;
+        if (this.material && this.material.uniforms) {
+            this.material.uniforms.u_mode.value = this.magneticMode;
+        }
+        this._reconfigureDipolesForMode();
     }
 
     setThickness(val) {
