@@ -25,9 +25,10 @@ class VJController {
         // Two-Counter Director:
         // Counter 1: On every odd step, Dancer (Scene 5 / idx 4) is shown.
         //            On every even step, Counter 2 is consulted and advanced.
-        // Counter 2: Cycles sequentially through ambient scenes (0=Mandalas, 1=Ridgelines, 2=Bubbles, 3=Mountain).
+        // Counter 2: Cycles sequentially through ambient scenes (0=Mandalas, 1=Ridgelines, 2=Bubbles, 3=Mountain, 5=Ferrofluid).
         this.counter1 = 1; // Start on odd (Dancer)
         this.counter2 = 0; // Next ambient scene will be Scene 1 (Mandalas / idx 0)
+        this.ambientScenes = [0, 1, 2, 3, 5];
 
         this.autoCycleEnabled = true;
         this.timeInCurrentScene = 0;
@@ -84,12 +85,17 @@ class VJController {
         var dancerScene = new DancerScene();
         dancerScene.init(this.threeContainer);
 
-        this.scenes = [mandalaScene, ridgelineScene, bubbleScene, mountainScene, dancerScene];
+        // Scene 5: Ferrofluid & Inks (WebGL)
+        var ferrofluidScene = new FerrofluidScene();
+        ferrofluidScene.init(this.threeContainer);
+
+        this.scenes = [mandalaScene, ridgelineScene, bubbleScene, mountainScene, dancerScene, ferrofluidScene];
 
         this.bindEvents();
         this.bindHotkeys();
         this.bindProportionsStudio();
         this.updateHUD();
+        this.initRemoteWebSocket();
 
         // DEFAULT TO LIVE AUDIO:
         this.activateLiveAudio();
@@ -102,7 +108,7 @@ class VJController {
         requestAnimationFrame((t) => this.renderLoop(t));
     }
 
-    _isWebGL(idx) { return idx === 1 || idx === 3 || idx === 4; }
+    _isWebGL(idx) { return idx === 1 || idx === 3 || idx === 4 || idx === 5; }
 
     /**
      * Start live audio immediately and attach first-gesture auto-resume
@@ -148,6 +154,7 @@ class VJController {
             if (this.scenes[1] && this.scenes[1].resize) this.scenes[1].resize(width, height);
             if (this.scenes[3] && this.scenes[3].resize) this.scenes[3].resize(width, height);
             if (this.scenes[4] && this.scenes[4].resize) this.scenes[4].resize(width, height);
+            if (this.scenes[5] && this.scenes[5].resize) this.scenes[5].resize(width, height);
         }
     }
 
@@ -164,10 +171,11 @@ class VJController {
             // Dancer selected manually: set counter1 to odd (1)
             this.counter1 = 1;
         } else {
-            // Ambient scene (0..3) selected manually: set counter1 to even (0),
-            // and prepare counter2 for the subsequent ambient scene (idx + 1)
+            // Ambient scene selected manually: set counter1 to even (0),
+            // and prepare counter2 for the subsequent ambient scene in the rotation
             this.counter1 = 0;
-            this.counter2 = (idx + 1) % 4;
+            var pos = this.ambientScenes.indexOf(idx);
+            this.counter2 = (pos !== -1) ? (pos + 1) % this.ambientScenes.length : 0;
         }
 
         var s = this.scenes[idx];
@@ -186,9 +194,9 @@ class VJController {
             // Odd step: Dancer (Scene 5 / idx 4)
             nextIdx = 4;
         } else {
-            // Even step: Consult counter 2 (0..3), then advance it
-            nextIdx = this.counter2;
-            this.counter2 = (this.counter2 + 1) % 4;
+            // Even step: Consult counter 2 among ambient scenes, then advance it
+            nextIdx = this.ambientScenes[this.counter2 % this.ambientScenes.length];
+            this.counter2 = (this.counter2 + 1) % this.ambientScenes.length;
         }
         this.setScene(nextIdx);
     }
@@ -198,6 +206,11 @@ class VJController {
      */
     triggerDropFlash() {
         this.flashIntensity = 0.85;
+
+        // Trigger shockwave in Ferrofluid Scene if present
+        if (this.scenes[5] && this.scenes[5].triggerDropShockwave) {
+            this.scenes[5].triggerDropShockwave();
+        }
 
         // Button pulse feedback
         var btnMutate = document.getElementById("btn-mutate");
@@ -295,7 +308,209 @@ class VJController {
         this.broadcastRemoteState();
     }
 
-    broadcastRemoteState() {}
+    initRemoteWebSocket() {
+        var host = window.location.hostname || "127.0.0.1";
+        var wsUrl = "ws://" + host + ":8001";
+        var ws = null;
+        var retryTimer = null;
+
+        var connect = () => {
+            if (ws) {
+                try { ws.close(); } catch(e) {}
+            }
+            try {
+                ws = new WebSocket(wsUrl);
+            } catch (err) {
+                scheduleRetry();
+                return;
+            }
+
+            ws.onopen = () => {
+                this.remoteWS = ws;
+                console.log("[Remote WS] Connected to relay server:", wsUrl);
+                this.broadcastRemoteState();
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    var msg = JSON.parse(event.data);
+                    if (msg.type === "command") {
+                        this.handleRemoteCommand(msg);
+                    } else if (msg.type === "get_state") {
+                        this.broadcastRemoteState();
+                    }
+                } catch(e) {}
+            };
+
+            ws.onclose = () => {
+                this.remoteWS = null;
+                scheduleRetry();
+            };
+
+            ws.onerror = () => {
+                this.remoteWS = null;
+            };
+        };
+
+        var scheduleRetry = () => {
+            if (retryTimer) clearTimeout(retryTimer);
+            retryTimer = setTimeout(connect, 3000);
+        };
+
+        connect();
+    }
+
+    broadcastRemoteState() {
+        if (!this.remoteWS || this.remoteWS.readyState !== WebSocket.OPEN) return;
+        var dancer = this.scenes[4];
+        var clip = (dancer && dancer.allClips) ? dancer.allClips[dancer.currentClipName] : null;
+        var activePal = (dancer && dancer.palettes) ? dancer.palettes[dancer.paletteIdx] : null;
+        var payload = {
+            type: "state_update",
+            sceneIdx: this.activeSceneIdx,
+            sceneName: this.scenes[this.activeSceneIdx] ? this.scenes[this.activeSceneIdx].name : "",
+            danceClip: dancer ? dancer.currentClipName : "",
+            danceTitle: clip ? clip.name : (dancer ? dancer.currentClipName : ""),
+            danceLocked: dancer ? (dancer.danceLocked ? true : false) : false,
+            blackout: this.blackout,
+            sceneLock: !this.autoCycleEnabled,
+            bpm: window.audioEngine ? window.audioEngine.bpm : 126,
+            audioLive: window.audioEngine ? window.audioEngine.isListening : false,
+            sensitivity: window.audioEngine ? window.audioEngine.sensitivity : 1.0,
+            formation: dancer ? dancer.formation : "1",
+            speed: dancer ? dancer.speedScale : 1.0,
+            cameraAngle: dancer ? dancer.cameraAnglePreset : "orbit",
+            poseMode: dancer ? dancer.poseMode : "dance",
+            outfitName: activePal ? activePal.name : "Cyber Carnival",
+            terrainName: this.terrainNames[this.terrainIdx] || "Nebo",
+            terrainCadence: this.mountainBeatCadence > 0 ? (this.mountainBeatCadence + "B") : "Man",
+            danceCadence: (dancer && dancer.danceCadenceMultiplier) ? (dancer.danceCadenceMultiplier + "x") : "1x",
+            danceTitleEnabled: this.danceTitleEnabled,
+            danceTitleStyle: this.danceTitleStyle,
+            mirrored: this.isMirrored
+        };
+        try {
+            this.remoteWS.send(JSON.stringify(payload));
+        } catch(e) {}
+    }
+
+    handleRemoteCommand(cmd) {
+        if (cmd.action === "triggerDropFlash") {
+            this.triggerDropFlash();
+        } else if (cmd.action === "setScene") {
+            if (typeof cmd.sceneIdx === "number") this.setScene(cmd.sceneIdx);
+        } else if (cmd.action === "toggleBlackout") {
+            this.toggleBlackout();
+        } else if (cmd.action === "toggleFullscreen") {
+            this.toggleFullscreen();
+        } else if (cmd.action === "toggleMirrorDisplay") {
+            this.toggleMirrorDisplay(cmd.forceState);
+        } else if (cmd.action === "toggleSceneLock") {
+            this.toggleSceneLock();
+        } else if (cmd.action === "toggleDanceLock") {
+            var dancer = this.scenes[4];
+            var targetLock = (cmd.locked !== undefined) ? cmd.locked : (dancer ? !dancer.danceLocked : true);
+            if (targetLock) {
+                if (this.activeSceneIdx !== 4) this.setScene(4);
+                this.autoCycleEnabled = false;
+                if (dancer && dancer.toggleDanceLock) dancer.toggleDanceLock(true);
+            } else {
+                this.autoCycleEnabled = true;
+                if (dancer && dancer.toggleDanceLock) dancer.toggleDanceLock(false);
+            }
+            this.updateHUD();
+        } else if (cmd.action === "cycleTerrain") {
+            if (this.activeSceneIdx !== 1 && this.activeSceneIdx !== 3) this.setScene(3);
+            this.cycleTerrain();
+        } else if (cmd.action === "cycleMountainCadence") {
+            if (this.activeSceneIdx !== 1 && this.activeSceneIdx !== 3) this.setScene(3);
+            this.cycleMountainCadence();
+        } else if (cmd.action === "cycleDanceCadence") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && dancer.cycleDanceCadence) dancer.cycleDanceCadence();
+        } else if (cmd.action === "cycleOutfit") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && dancer.cycleOutfit) dancer.cycleOutfit();
+        } else if (cmd.action === "setOutfit") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && dancer.setOutfit && typeof cmd.outfitIdx === "number") {
+                dancer.setOutfit(cmd.outfitIdx);
+            }
+        } else if (cmd.action === "playDance") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            if (this.scenes[4] && this.scenes[4].playDanceNow && cmd.clipId) {
+                this.scenes[4].playDanceNow(cmd.clipId);
+            }
+        } else if (cmd.action === "nextDance") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && dancer.playlist && dancer.playlist.length > 0) {
+                dancer.playlistIdx = (dancer.playlistIdx + 1) % dancer.playlist.length;
+                dancer.triggerClipTransition(dancer.playlist[dancer.playlistIdx]);
+            }
+        } else if (cmd.action === "setFormation") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && dancer.setFormation && cmd.formation) {
+                dancer.setFormation(cmd.formation);
+            }
+        } else if (cmd.action === "setSpeed") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && typeof cmd.speed === "number") {
+                dancer.speedScale = cmd.speed;
+                dancer.flashSpeedHUD();
+            }
+        } else if (cmd.action === "setCameraAngle") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && dancer.setCameraAngle && cmd.angle) {
+                dancer.setCameraAngle(cmd.angle);
+            }
+        } else if (cmd.action === "setPoseMode") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            var dancer = this.scenes[4];
+            if (dancer && dancer.setPoseMode && cmd.mode) {
+                dancer.setPoseMode(cmd.mode);
+            }
+        } else if (cmd.action === "toggleAudio") {
+            this.toggleAudio();
+        } else if (cmd.action === "tapTempo") {
+            if (window.audioEngine) {
+                var bpm = window.audioEngine.recordTapTempo();
+                var bpmEl = document.getElementById("val-bpm");
+                if (bpmEl) bpmEl.textContent = bpm + " BPM";
+            }
+        } else if (cmd.action === "setSensitivity") {
+            if (window.audioEngine && typeof cmd.sensitivity === "number") {
+                window.audioEngine.sensitivity = cmd.sensitivity;
+                this.updateSensitivityUI();
+            }
+        } else if (cmd.action === "setDanceTitleStyle") {
+            if (this.activeSceneIdx !== 4) this.setScene(4);
+            this.danceTitleEnabled = true;
+            var cb = document.getElementById("cb-dance-title-enable");
+            if (cb) cb.checked = true;
+            if (cmd.style) {
+                this.danceTitleStyle = cmd.style;
+                var sel = document.getElementById("sel-dance-title-style");
+                if (sel) sel.value = cmd.style;
+            }
+            var dancer = this.scenes[4];
+            var clip = (dancer && dancer.allClips) ? dancer.allClips[dancer.currentClipName] : null;
+            this.showDanceTitle(clip ? clip.name : "Dance", true);
+        } else if (cmd.action === "toggleDanceTitle") {
+            if (cmd.enabled !== undefined) {
+                this.danceTitleEnabled = cmd.enabled;
+                var cb = document.getElementById("cb-dance-title-enable");
+                if (cb) cb.checked = cmd.enabled;
+            }
+        }
+        this.broadcastRemoteState();
+    }
 
     cycleTerrain() {
         this.terrainIdx = (this.terrainIdx + 1) % this.terrainNames.length;
@@ -395,6 +610,7 @@ class VJController {
                 var val = parseFloat(e.target.value);
                 document.getElementById("val-line-thick").textContent = val.toFixed(1) + "px";
                 if (this.scenes[1] && this.scenes[1].setThickness) this.scenes[1].setThickness(val);
+                if (this.scenes[5] && this.scenes[5].setThickness) this.scenes[5].setThickness(val);
             });
         }
 
@@ -503,6 +719,7 @@ class VJController {
             else if (e.code === "Digit3") this.setScene(2);
             else if (e.code === "Digit4") this.setScene(3);
             else if (e.code === "Digit5") this.setScene(4);
+            else if (e.code === "Digit6") this.setScene(5);
             else if (e.code === "KeyL") { e.preventDefault(); this.toggleSceneLock(); }
             else if (e.code === "KeyX") { e.preventDefault(); this.toggleMirrorDisplay(); }
             else if (e.code === "KeyT") {
@@ -971,6 +1188,12 @@ class VJController {
             });
         }
 
+        // Update remote host display
+        var remoteHostDisplay = document.getElementById("remote-host-display");
+        if (remoteHostDisplay) {
+            remoteHostDisplay.textContent = window.location.hostname || "127.0.0.1";
+        }
+
         // Initialize dance checklist items
         this.populateDanceChecklist();
     }
@@ -1234,7 +1457,7 @@ class VJController {
                 var prevAlpha = (this.isCrossfading && prev >= 0) ? (1.0 - this.crossfadeAlpha) : 0.0;
 
                 // Render WebGL scenes: only active and crossfading previous; hide others without reflow thrashing
-                [1, 3, 4].forEach((idx) => {
+                [1, 3, 4, 5].forEach((idx) => {
                     var s = this.scenes[idx];
                     if (!s || !s.render) return;
                     if (idx === active) {
@@ -1257,7 +1480,7 @@ class VJController {
                 // Blackout: clear 2D, hide all WebGL
                 this.ctx2D.fillStyle = "#000000";
                 this.ctx2D.fillRect(0, 0, w, h);
-                [1, 3, 4].forEach((idx) => {
+                [1, 3, 4, 5].forEach((idx) => {
                     var s = this.scenes[idx];
                     if (s && s.render) s.render(0.0);
                 });
@@ -1289,7 +1512,9 @@ class VJController {
                 mids: document.getElementById("meter-mids"),
                 highs: document.getElementById("meter-highs"),
                 beatDot: document.getElementById("beat-indicator"),
-                sceneName: document.getElementById("current-scene-name")
+                sceneName: document.getElementById("current-scene-name"),
+                stateBadge: document.getElementById("musical-state-badge"),
+                tensionFill: document.getElementById("meter-tension-fill")
             };
         }
         var mc = this._meterCache;
@@ -1300,8 +1525,22 @@ class VJController {
 
         if (mc.beatDot) mc.beatDot.classList.toggle("active", audio.isBeat);
 
-        if (this.activeSceneIdx === 4 && this.scenes && this.scenes[4] && mc.sceneName) {
-            var curName = this.scenes[4].name;
+        // Musical Structure Badge
+        if (mc.stateBadge && audio.musicalState) {
+            var label = audio.musicalState.toUpperCase().replace('_', '-');
+            if (mc.stateBadge.textContent !== label) {
+                mc.stateBadge.textContent = label;
+                mc.stateBadge.className = "musical-state-badge state-" + audio.musicalState;
+            }
+        }
+
+        // Dance Music Tension Meter Fill
+        if (mc.tensionFill && audio.tension !== undefined) {
+            mc.tensionFill.style.height = Math.min(100, Math.round(audio.tension * 100)) + "%";
+        }
+
+        if (this.scenes && this.scenes[this.activeSceneIdx] && mc.sceneName) {
+            var curName = this.scenes[this.activeSceneIdx].name;
             if (mc.sceneName.textContent !== curName) {
                 mc.sceneName.textContent = curName;
             }

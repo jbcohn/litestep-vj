@@ -51,9 +51,30 @@ class AudioEngine {
         // Listeners
         this.beatCallbacks = [];
         this.dropCallbacks = [];
+        this.stateCallbacks = [];
+
+        // Musical Structure & Dance Tension Analysis
+        this.musicalState = 'groove'; // 'groove' | 'breakdown' | 'buildup' | 'pre_drop' | 'drop'
+        this.previousMusicalState = 'groove';
+        this.tension = 0.0;            // 0.0 to 1.0 (accumulated musical suspense)
+        this.buildupProgress = 0.0;    // 0.0 to 1.0
+        this.dropIntensity = 0.0;      // 0.0 to 1.0 (peaks on drop, decays organically)
+        this.spectralCentroid = 0.0;   // 0.0 to 1.0 (timbre brightness / filter cutoff)
+        this.spectralFlux = 0.0;       // Rate of spectral change
+        this.onsetDensity = 0.0;       // Transients per second (snare rolls, etc.)
+        this.energySlope = 0.0;        // Trend in loudness over ~1.5s
+        this.lowRatio = 0.5;           // Proportion of energy in Sub + Bass
+
+        this.energyHistory = [];       // Sliding energy history for trend analysis
+        this.energyHistoryMax = 90;
+        this.onsetHistory = [];        // Timestamps of recent transient onsets
+        this.prevSpectrum = null;      // Previous frame spectrum for flux calculation
+        this.stateTimer = 0;           // Seconds spent in current musical state
+        this.breakdownWatchTimer = 0;
 
         // Simulation State
         this.simTime = 0;
+        this.simBeatCounter = 0;
     }
 
     async init() {
@@ -137,6 +158,29 @@ class AudioEngine {
         this.dropCallbacks.push(callback);
     }
 
+    onStateChange(callback) {
+        this.stateCallbacks.push(callback);
+    }
+
+    setMusicalState(newState) {
+        if (this.musicalState === newState) return;
+        this.previousMusicalState = this.musicalState;
+        this.musicalState = newState;
+        this.stateTimer = 0;
+        this.stateCallbacks.forEach(cb => {
+            try { cb(newState, this.previousMusicalState); } catch (e) { console.error("State callback error:", e); }
+        });
+    }
+
+    triggerDrop() {
+        this.setMusicalState('drop');
+        this.dropDetected = true;
+        this.dropIntensity = 1.0;
+        this.dropCallbacks.forEach(cb => {
+            try { cb(); } catch (e) { console.error("Drop callback error:", e); }
+        });
+    }
+
     recordTapTempo() {
         const now = performance.now();
         this.tapHistory.push(now);
@@ -162,7 +206,7 @@ class AudioEngine {
         this.dropDetected = false;
 
         // Track beat phase from BPM
-        const beatInterval = 60 / this.bpm;
+        const beatInterval = 60 / Math.max(40, this.bpm);
         this.beatPhase = (this.beatPhase + dt / beatInterval) % 1.0;
 
         if (this.isListening && this.analyser) {
@@ -204,7 +248,48 @@ class AudioEngine {
             this.highs = smooth(this.highs, rawHighs, 0.55, 0.18);
             this.energy = smooth(this.energy, rawEnergy, 0.5, 0.1);
 
-            // Transient Beat Detection on Sub + Bass
+            // 1. Feature Extraction: Spectral Centroid (Timbre Brightness / Filter Sweeps)
+            let weightedSum = 0;
+            let totalMag = 0;
+            for (let i = 0; i < this.frequencyData.length; i++) {
+                const mag = this.frequencyData[i];
+                weightedSum += i * mag;
+                totalMag += mag;
+            }
+            const rawCentroid = totalMag > 0 ? (weightedSum / (totalMag * this.frequencyData.length)) : 0;
+            this.spectralCentroid = this.spectralCentroid * 0.88 + rawCentroid * 0.12;
+
+            // 2. Feature Extraction: Spectral Flux (Detection of fast rolls & sweeping filters)
+            if (this.prevSpectrum) {
+                let fluxSum = 0;
+                for (let i = 0; i < this.frequencyData.length; i++) {
+                    const diff = (this.frequencyData[i] - this.prevSpectrum[i]) / 255;
+                    if (diff > 0) fluxSum += diff;
+                }
+                const rawFlux = fluxSum / (this.frequencyData.length * 0.2);
+                this.spectralFlux = this.spectralFlux * 0.75 + Math.min(1.0, rawFlux) * 0.25;
+            } else {
+                this.prevSpectrum = new Uint8Array(this.frequencyData.length);
+            }
+            this.prevSpectrum.set(this.frequencyData);
+
+            // 3. Feature Extraction: Energy History & Energy Slope (Loudness Trend)
+            this.energyHistory.push(this.energy);
+            if (this.energyHistory.length > this.energyHistoryMax) this.energyHistory.shift();
+
+            if (this.energyHistory.length >= 30) {
+                const half = Math.floor(this.energyHistory.length / 2);
+                let oldSum = 0, newSum = 0;
+                for (let i = 0; i < half; i++) oldSum += this.energyHistory[i];
+                for (let i = half; i < this.energyHistory.length; i++) newSum += this.energyHistory[i];
+                this.energySlope = (newSum / (this.energyHistory.length - half)) - (oldSum / half);
+            }
+
+            // 4. Feature Extraction: Low Frequency Energy Ratio
+            const lowEnergy = this.sub * 0.6 + this.bass * 0.4;
+            this.lowRatio = this.energy > 0.04 ? Math.min(1.0, lowEnergy / Math.max(0.01, this.energy)) : 0.5;
+
+            // 5. Transient Beat Detection on Sub + Bass
             const instantBassEnergy = rawSub * 0.6 + rawBass * 0.4;
             this.bassHistory.push(instantBassEnergy);
             if (this.bassHistory.length > this.historySize) this.bassHistory.shift();
@@ -213,18 +298,20 @@ class AudioEngine {
             const variance = this.bassHistory.reduce((a, b) => a + Math.pow(b - avgBass, 2), 0) / this.bassHistory.length;
             const dynamicThreshold = (-15 * variance) + 1.35; // Adaptive sensitivity
 
+            const nowTs = performance.now();
             if (instantBassEnergy > avgBass * Math.max(1.15, dynamicThreshold) && instantBassEnergy > 0.18 && this.timeSinceLastBeat > 0.22) {
                 this.isBeat = true;
                 const interval = this.timeSinceLastBeat;
                 this.timeSinceLastBeat = 0;
                 this.beatConfidence = Math.min(1.0, (instantBassEnergy - avgBass) * 2.5);
 
+                this.onsetHistory.push(nowTs);
+
                 // Auto-estimate BPM from live inter-beat intervals
                 if (interval >= 0.28 && interval <= 2.2) {
                     let normInterval = interval;
-                    // Fold into typical 70 - 170 BPM musical range
-                    while (normInterval < 0.35) normInterval *= 2; // > 171 BPM -> half time
-                    while (normInterval > 0.86) normInterval /= 2; // < 70 BPM -> double time
+                    while (normInterval < 0.35) normInterval *= 2;
+                    while (normInterval > 0.86) normInterval /= 2;
 
                     this.detectedIntervals.push(normInterval);
                     if (this.detectedIntervals.length > 8) this.detectedIntervals.shift();
@@ -234,7 +321,6 @@ class AudioEngine {
                         const medianInterval = sorted[Math.floor(sorted.length / 2)];
                         const rawBpm = Math.round(60 / medianInterval);
                         if (rawBpm >= 65 && rawBpm <= 180) {
-                            // Smooth moving average
                             this.bpm = Math.round(this.bpm * 0.82 + rawBpm * 0.18);
                         }
                     }
@@ -243,32 +329,214 @@ class AudioEngine {
                 this.beatCallbacks.forEach(cb => cb(this.beatConfidence));
             }
 
-            // Drop Detection: Sudden surge of full spectrum energy after a quiet lull
-            if (this.energy > 0.65 && avgBass < 0.25 && this.timeSinceLastBeat < 0.05) {
-                this.dropDetected = true;
-                this.dropCallbacks.forEach(cb => cb());
-            }
+            // Clean old onsets (> 2000ms) and calculate onset density
+            this.onsetHistory = this.onsetHistory.filter(t => nowTs - t < 2000);
+            this.onsetDensity = this.onsetHistory.length / 2.0;
+
+            // 6. Real-Time Musical Structure State Machine
+            this.updateMusicalState(dt);
 
         } else if (this.useSimulation) {
-            // Simulated 4-on-the-floor beat loop (Kick on quarter notes, hi-hats on 8ths, rolling synth bass)
+            // Simulated 80-beat EDM cycle:
+            // 32 beats Groove -> 16 beats Breakdown -> 15 beats Buildup -> 1 beat Pre-Drop -> 16 beats Drop
             this.simTime += dt;
             const beatFreq = this.bpm / 60; // beats per sec
-            const kickEnv = Math.pow(Math.max(0, 1 - (this.simTime * beatFreq % 1.0)), 3.5);
-            const hatEnv = Math.pow(Math.max(0, 1 - ((this.simTime * beatFreq + 0.5) % 1.0)), 4.0);
-            const synEnv = 0.35 + 0.25 * Math.sin(this.simTime * 2.1);
+            const totalBeatsInCycle = 80;
+            const beatPos = (this.simTime * beatFreq) % totalBeatsInCycle;
+            const beatSubPhase = (this.simTime * beatFreq) % 1.0;
 
-            this.sub = kickEnv * 0.9 * this.sensitivity;
-            this.bass = (kickEnv * 0.7 + synEnv * 0.3) * this.sensitivity;
-            this.mids = synEnv * this.sensitivity;
-            this.highs = hatEnv * 0.65 * this.sensitivity;
-            this.energy = (this.sub * 0.4 + this.bass * 0.3 + this.mids * 0.2 + this.highs * 0.1);
+            const kickBase = Math.pow(Math.max(0, 1 - beatSubPhase), 3.5);
+            const hatBase  = Math.pow(Math.max(0, 1 - ((this.simTime * beatFreq + 0.5) % 1.0)), 4.0);
 
-            if (kickEnv > 0.88 && this.timeSinceLastBeat > 0.35) {
-                this.isBeat = true;
-                this.timeSinceLastBeat = 0;
-                this.beatConfidence = 0.9;
-                this.beatCallbacks.forEach(cb => cb(0.9));
+            if (beatPos < 32) {
+                // Phase 1: GROOVE (Beats 0..31)
+                this.setMusicalState('groove');
+                this.tension = Math.max(0.05, this.tension - dt * 0.15);
+                this.buildupProgress = 0.0;
+                this.dropIntensity = Math.max(0.0, this.dropIntensity - dt * 0.4);
+
+                const bassLine = 0.35 + 0.3 * Math.sin(this.simTime * beatFreq * Math.PI * 4);
+                this.sub = kickBase * 0.92 * this.sensitivity;
+                this.bass = (kickBase * 0.7 + bassLine * 0.3) * this.sensitivity;
+                this.mids = bassLine * 0.6 * this.sensitivity;
+                this.highs = hatBase * 0.65 * this.sensitivity;
+                this.energy = (this.sub * 0.4 + this.bass * 0.3 + this.mids * 0.2 + this.highs * 0.1);
+                this.spectralCentroid = 0.25 + 0.05 * Math.sin(this.simTime * 0.8);
+
+                if (kickBase > 0.88 && this.timeSinceLastBeat > 0.35) {
+                    this.isBeat = true;
+                    this.timeSinceLastBeat = 0;
+                    this.beatConfidence = 0.9;
+                    this.beatCallbacks.forEach(cb => cb(0.9));
+                }
+
+            } else if (beatPos < 48) {
+                // Phase 2: BREAKDOWN (Beats 32..47)
+                this.setMusicalState('breakdown');
+                const prog = (beatPos - 32) / 16;
+                this.tension = 0.15 + prog * 0.35;
+                this.buildupProgress = 0.0;
+                this.dropIntensity = 0.0;
+
+                // Kick and heavy bass vanish; ethereal ambient pads and arpeggios
+                const pad = 0.4 + 0.3 * Math.sin(this.simTime * 1.8);
+                const arp = 0.35 + 0.25 * Math.sin(this.simTime * beatFreq * Math.PI * 2);
+                this.sub = 0.03 * this.sensitivity;
+                this.bass = 0.05 * this.sensitivity;
+                this.mids = pad * this.sensitivity;
+                this.highs = (arp * 0.6 + 0.2) * this.sensitivity;
+                this.energy = (this.sub * 0.4 + this.bass * 0.3 + this.mids * 0.2 + this.highs * 0.1);
+                this.spectralCentroid = 0.35 + prog * 0.15;
+
+            } else if (beatPos < 63) {
+                // Phase 3: BUILDUP (Beats 48..62)
+                this.setMusicalState('buildup');
+                const prog = (beatPos - 48) / 15;
+                this.tension = 0.50 + prog * 0.48;
+                this.buildupProgress = prog;
+
+                // Accelerating snare / clap roll
+                let rollRate = 1.0; // quarter notes
+                if (beatPos >= 52 && beatPos < 56) rollRate = 2.0;       // 8ths
+                else if (beatPos >= 56 && beatPos < 60) rollRate = 4.0;  // 16ths
+                else if (beatPos >= 60) rollRate = 8.0;                  // 32nds
+
+                const snareEnv = Math.pow(Math.max(0, 1 - (this.simTime * beatFreq * rollRate % 1.0)), 2.8);
+                const riser = prog; // High-pass sweep upward
+
+                this.sub = 0.05 * this.sensitivity;
+                this.bass = (snareEnv * 0.35 * prog) * this.sensitivity;
+                this.mids = (snareEnv * 0.75 + riser * 0.6) * this.sensitivity;
+                this.highs = (snareEnv * 0.55 + riser * 0.8) * this.sensitivity;
+                this.energy = (this.sub * 0.2 + this.bass * 0.2 + this.mids * 0.35 + this.highs * 0.25);
+                this.spectralCentroid = 0.35 + riser * 0.55; // Audible rising cutoff
+                this.onsetDensity = rollRate * (this.bpm / 60);
+
+                if (snareEnv > 0.85 && this.timeSinceLastBeat > (0.8 / (beatFreq * rollRate))) {
+                    this.isBeat = true;
+                    this.timeSinceLastBeat = 0;
+                    this.beatConfidence = 0.6 + prog * 0.35;
+                    this.beatCallbacks.forEach(cb => cb(this.beatConfidence));
+                }
+
+            } else if (beatPos < 64) {
+                // Phase 4: PRE-DROP GAP (Beats 63..64)
+                this.setMusicalState('pre_drop');
+                this.tension = 1.0;
+                this.buildupProgress = 1.0;
+                // Sudden vacuum / tape stop silence
+                this.sub = 0.0;
+                this.bass = 0.0;
+                this.mids = 0.06;
+                this.highs = 0.04;
+                this.energy = 0.03;
+                this.spectralCentroid = 0.1;
+
+            } else {
+                // Phase 5: DROP (Beats 64..79)
+                if (this.musicalState !== 'drop') {
+                    this.triggerDrop();
+                }
+                const dropProg = (beatPos - 64) / 16;
+                this.tension = Math.max(0.0, 1.0 - dropProg * 1.2);
+                this.buildupProgress = 0.0;
+                this.dropIntensity = Math.max(0.0, this.dropIntensity - dt * 0.3);
+
+                // Huge sub slam + punchy kick + massive synths
+                const kickSlam = Math.pow(Math.max(0, 1 - beatSubPhase), 2.5);
+                const subSlam  = Math.pow(Math.max(0, 1 - beatSubPhase), 1.8) * 0.95;
+                const synDrop  = 0.5 + 0.45 * Math.sin(this.simTime * beatFreq * Math.PI * 4);
+
+                this.sub = (subSlam * 0.98 + (1 - dropProg) * 0.2) * this.sensitivity;
+                this.bass = (kickSlam * 0.9 + synDrop * 0.4) * this.sensitivity;
+                this.mids = synDrop * 0.85 * this.sensitivity;
+                this.highs = (hatBase * 0.8 + 0.3) * this.sensitivity;
+                this.energy = (this.sub * 0.45 + this.bass * 0.3 + this.mids * 0.15 + this.highs * 0.1);
+                this.spectralCentroid = 0.45 + 0.15 * Math.sin(this.simTime * 2.0);
+
+                if (kickSlam > 0.85 && this.timeSinceLastBeat > 0.32) {
+                    this.isBeat = true;
+                    this.timeSinceLastBeat = 0;
+                    this.beatConfidence = 1.0;
+                    this.beatCallbacks.forEach(cb => cb(1.0));
+                }
             }
+        }
+    }
+
+    updateMusicalState(dt) {
+        this.stateTimer += dt;
+        this.dropIntensity = Math.max(0.0, this.dropIntensity - dt * 0.35);
+
+        switch (this.musicalState) {
+            case 'groove':
+                this.tension = Math.max(0.05, this.tension - dt * 0.12);
+                this.buildupProgress = 0.0;
+                // Breakdown detector: Sub/bass vanishes while vocal/synth mids or highs remain
+                if (this.lowRatio < 0.24 && this.energy < 0.48 && (this.mids + this.highs) > 0.15) {
+                    this.breakdownWatchTimer += dt;
+                    if (this.breakdownWatchTimer > 1.2) {
+                        this.setMusicalState('breakdown');
+                        this.breakdownWatchTimer = 0;
+                    }
+                } else {
+                    this.breakdownWatchTimer = Math.max(0, this.breakdownWatchTimer - dt * 0.5);
+                }
+
+                // Buildup detector: Accelerating onsets or positive energy gradient + rising spectral centroid
+                if (this.energySlope > 0.08 && (this.spectralCentroid > 0.18 || this.onsetDensity > 2.8) && this.stateTimer > 3.0) {
+                    this.setMusicalState('buildup');
+                }
+                break;
+
+            case 'breakdown':
+                this.tension = Math.min(0.65, this.tension + dt * 0.07);
+                // Transition to buildup if riser or rolls begin
+                if (this.energySlope > 0.06 || this.onsetDensity > 2.5 || this.spectralCentroid > 0.25) {
+                    this.setMusicalState('buildup');
+                }
+                // Transition back to groove if kick returns normally without drop
+                if (this.lowRatio > 0.55 && this.sub > 0.45 && this.stateTimer > 2.0) {
+                    this.setMusicalState('groove');
+                }
+                break;
+
+            case 'buildup':
+                this.tension = Math.min(1.0, this.tension + dt * 0.14);
+                this.buildupProgress = this.tension;
+                // Pre-drop gap detection: sudden cut of sub/bass and energy drop after high tension
+                if (this.tension > 0.65 && this.energy < 0.22 && this.lowRatio < 0.20) {
+                    this.setMusicalState('pre_drop');
+                }
+                // Direct drop detection: massive sub slam following buildup
+                else if (this.tension > 0.50 && this.rawSub > 0.72 && this.energy > 0.62) {
+                    this.triggerDrop();
+                }
+                // Timeout safety (25s buildup without drop decays back to groove)
+                else if (this.stateTimer > 25.0) {
+                    this.setMusicalState('groove');
+                }
+                break;
+
+            case 'pre_drop':
+                this.tension = 1.0;
+                // Drop hit: sudden sub bass explosion
+                if (this.rawSub > 0.65 || (this.energy > 0.58 && this.stateTimer > 0.1)) {
+                    this.triggerDrop();
+                }
+                // If silence lingers too long, fall back to breakdown
+                else if (this.stateTimer > 2.5) {
+                    this.setMusicalState('breakdown');
+                }
+                break;
+
+            case 'drop':
+                this.tension = Math.max(0.0, this.tension - dt * 0.35);
+                // After drop shockwave, settle into heavy groove
+                if (this.stateTimer > 5.0) {
+                    this.setMusicalState('groove');
+                }
+                break;
         }
     }
 }

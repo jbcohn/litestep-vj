@@ -41,18 +41,21 @@
 
         <!-- Floating VJ HUD Cockpit (Bottom Center) -->
         <div id="vj-hud">
-            <!-- Scene Title & Beat Dot -->
+            <!-- Scene Title, Musical State & Beat Dot -->
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
                     <h1>LiteStep VJ <span class="app-version">vers. 4023</span></h1>
-                    <span id="current-scene-name">Form Constants</span>
+                    <div class="hud-scene-status">
+                        <span id="current-scene-name">Form Constants</span>
+                        <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
+                    </div>
                 </div>
             </div>
 
-            <!-- Audio Spectrum Meters -->
+            <!-- Audio Spectrum Meters & Tension Meter -->
             <div class="hud-section">
-                <div class="spectrum-box" title="Realtime Audio Frequency Energy">
+                <div class="spectrum-box" title="Realtime Audio Frequency Energy &amp; Musical Tension">
                     <div class="meter-col">
                         <div class="meter-bar-track"><div id="meter-sub" class="meter-fill"></div></div>
                         <span class="meter-label">Sub</span>
@@ -68,6 +71,10 @@
                     <div class="meter-col">
                         <div class="meter-bar-track"><div id="meter-highs" class="meter-fill"></div></div>
                         <span class="meter-label">High</span>
+                    </div>
+                    <div class="meter-col meter-col-tension" title="Musical Build-up Tension (0-100%)">
+                        <div class="meter-bar-track tension-track"><div id="meter-tension-fill" class="meter-fill"></div></div>
+                        <span class="meter-label">Tension</span>
                     </div>
                 </div>
             </div>
@@ -91,6 +98,9 @@
                         <button class="scene-btn" data-scene="4">
                             <span class="key-badge">5</span> Dancer
                         </button>
+                        <button class="scene-btn" data-scene="5">
+                            <span class="key-badge">6</span> Ferrofluid
+                        </button>
                     </div>
                     <button id="btn-scene-lock" class="vj-btn lock-btn" title="Toggle Auto-Cycle vs Hold Scene (L)">
                         <span id="lock-icon">🔄</span> <span id="lock-label">Auto</span>
@@ -98,7 +108,7 @@
                 </div>
                 <div class="hud-hotkeys-subbar">
                     <span><strong>Space</strong>: Mutate</span> &bull; 
-                    <span><strong>1&ndash;5</strong>: Scenes</span> &bull; 
+                    <span><strong>1&ndash;6</strong>: Scenes</span> &bull; 
                     <span><strong>L</strong>: Hold Scene</span> &bull; 
                     <span><strong>X</strong>: Rear Mirror</span> &bull; 
                     <span><strong>F</strong>: Hide UI</span> &bull; 
@@ -547,6 +557,7 @@
                 "js/scene-bubbles.js",
                 "js/scene-mountain.js",
                 "js/scene-dancer.js",
+                "js/scene-ferrofluid.js",
                 "js/vj-controller.js"
             ];
             for (var i = 0; i < scripts.length; i++) {
