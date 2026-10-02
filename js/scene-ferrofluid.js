@@ -23,10 +23,10 @@ class FerrofluidScene {
         this.time = 0;
         this.isInitialized = false;
 
-        // Camera control: pitch & yaw (allows switching between 3D perspective and top-down Hele-Shaw view)
-        this.pitch = 0.85; // ~48 deg perspective
+        // Camera control: pitch & yaw (high tabletop Petri dish view)
+        this.pitch = 1.30; // ~74.5 deg high overhead perspective
         this.yaw = 0.0;
-        this.targetPitch = 0.85;
+        this.targetPitch = 1.30;
         this.targetYaw = 0.0;
         this.isDragging = false;
         this.lastMouseX = 0;
@@ -278,24 +278,24 @@ class FerrofluidScene {
                 float F = ferro.x;
 
                 // 1. Viscous black ferrofluid standing ridge above the ink floor
-                // Smooth cubic hermite curvature for rounded fluid meniscus profile
+                // Elegant 2.5D embossed liquid relief (0.04 - 0.10 units)
                 float ridgeProfile = F * F * (3.0 - 2.0 * F);
-                float hRidge = ridgeProfile * (0.28 + u_sub * 0.85 + u_tension * 0.45);
+                float hRidge = ridgeProfile * (0.045 + u_sub * 0.065 + u_tension * 0.025);
 
-                // 2. Rosensweig Conical Spike Eruption along crests under high magnetic field / sub-bass
-                // Only peaks where ferrofluid is densest erupt into needle points
+                // 2. Rosensweig liquid beading along crests under bass
+                // Gentle liquid nodes rather than tall towers
                 float crestFactor = max(0.0, F - 0.65) / 0.35;
-                float needleSpike = pow(crestFactor, 2.2) * (0.35 + u_sub * 1.9 + u_tension * 0.7);
+                float needleSpike = pow(crestFactor, 2.5) * (0.02 + u_sub * 0.08);
 
-                // 3. Smooth Concentric Capillary Waves spreading across the liquid horizon (as in Image 1)
-                float capWave = sin(distCenter * 15.0 - u_time * 6.0) * (0.012 + u_highs * 0.035) * exp(-distCenter * 0.22);
+                // 3. Smooth Concentric Capillary Waves spreading across the liquid floor
+                float capWave = sin(distCenter * 14.0 - u_time * 5.0) * (0.003 + u_highs * 0.008) * exp(-distCenter * 0.25);
 
                 // 4. Musical Drop Shockwave Ring
                 float shockwave = 0.0;
                 if (u_drop_time >= 0.0 && u_drop_time < 3.0) {
                     float waveFront = u_drop_time * 3.6;
                     float delta = distCenter - waveFront;
-                    shockwave = sin(delta * 12.0) * exp(-delta * delta * 2.2) * exp(-u_drop_time * 1.3) * (u_drop * 0.45);
+                    shockwave = sin(delta * 12.0) * exp(-delta * delta * 2.5) * exp(-u_drop_time * 1.5) * (u_drop * 0.035);
                 }
 
                 return hRidge + needleSpike + capWave + shockwave;
@@ -303,7 +303,7 @@ class FerrofluidScene {
 
             // Normal Estimation via Central Differences
             vec3 getNormal(vec2 p, float h) {
-                const vec2 eps = vec2(0.012, 0.0);
+                const vec2 eps = vec2(0.008, 0.0);
                 float hR = getElevation(p + eps.xy);
                 float hL = getElevation(p - eps.xy);
                 float hU = getElevation(p + eps.yx);
@@ -314,13 +314,13 @@ class FerrofluidScene {
             void main() {
                 vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
 
-                // Camera Setup: Tunable 3D perspective / Hele-Shaw top-down view
-                float camDist = 4.2;
+                // Camera Setup: High Tabletop / Hele-Shaw View
+                float camDist = 4.0;
                 float pitch = u_pitch;
-                float yaw = u_yaw + u_time * 0.04; // Gentle serene turntable drift
+                float yaw = u_yaw + u_time * 0.03; // Gentle serene turntable drift
 
                 vec3 ro = vec3(camDist * sin(yaw) * cos(pitch), camDist * sin(pitch), -camDist * cos(yaw) * cos(pitch));
-                vec3 target = vec3(0.0, 0.12, 0.0);
+                vec3 target = vec3(0.0, 0.05, 0.0);
 
                 vec3 fwd = normalize(target - ro);
                 vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), fwd));
@@ -328,14 +328,14 @@ class FerrofluidScene {
                 vec3 rd = normalize(uv.x * right + uv.y * up + 1.65 * fwd);
 
                 // Raymarch Heightfield Surface with Binary Refinement
-                float t = 1.0;
-                float tMax = 12.0;
+                float t = 1.2;
+                float tMax = 7.5;
                 vec3 p = ro;
                 bool hit = false;
                 float finalH = 0.0;
                 float dt = 0.0;
 
-                for (int i = 0; i < 64; i++) {
+                for (int i = 0; i < 48; i++) {
                     p = ro + rd * t;
                     float h = getElevation(p.xz);
                     if (p.y <= h) {
@@ -343,7 +343,7 @@ class FerrofluidScene {
                         break;
                     }
                     float dY = p.y - h;
-                    dt = max(0.018, dY * 0.65);
+                    dt = max(0.025, dY * 0.85);
                     t += dt;
                     if (t > tMax) break;
                 }
@@ -387,15 +387,15 @@ class FerrofluidScene {
                 // 1. MATERIAL DIFFERENTIATION (Black Ferrofluid vs. Single Ink)
                 // -------------------------------------------------------------
                 // Jet-black obsidian ferrofluid albedo:
-                vec3 ferroColor = vec3(0.015, 0.016, 0.022);
+                vec3 ferroColor = vec3(0.012, 0.014, 0.018);
 
-                // Saturated single-color ink substrate (e.g. Amber Orange as in photo):
+                // Saturated single-color ink substrate (Amber Orange as in photo):
                 vec3 inkBase = u_ink_color;
                 // Subsurface translucency in the ink floor
-                vec3 inkLit  = mix(inkBase * 0.75, u_ink_glow, max(0.0, N.y) * 0.65);
+                vec3 inkLit  = mix(inkBase * 0.85, u_ink_glow, max(0.0, N.y) * 0.65);
 
-                // Meniscus Contact Shadow: Dark amber border where black fluid meets ink
-                inkLit *= mix(0.45, 1.0, 1.0 - edge * 0.85);
+                // Meniscus Contact Shadow: Subtle dark border where black fluid meets ink
+                inkLit *= mix(0.55, 1.0, 1.0 - edge * 0.75);
 
                 // Blend Albedo based on ferrofluid coverage F
                 float isFerro = smoothstep(0.35, 0.65, F);
@@ -404,8 +404,8 @@ class FerrofluidScene {
                 // -------------------------------------------------------------
                 // 2. LIGHTING RIG & GGX LIQUID SPECULAR
                 // -------------------------------------------------------------
-                // Key Light: Overhead warm photographic softbox
-                vec3 lKey = normalize(vec3(0.6, 1.5, -0.7));
+                // Key Light: Overhead photographic softbox
+                vec3 lKey = normalize(vec3(0.5, 2.2, -0.6));
                 float diffKey = max(0.0, dot(N, lKey));
                 vec3 hKey = normalize(lKey + V);
                 float NdotH = max(0.0, dot(N, hKey));
@@ -413,13 +413,13 @@ class FerrofluidScene {
                 float specKey = pow(NdotH, 96.0);
 
                 // Rim Light: Backlight grazing edges to silhouette spikes and fluid ridges
-                vec3 lRim = normalize(vec3(-0.7, 0.9, 1.3));
+                vec3 lRim = normalize(vec3(-0.7, 1.4, 1.1));
                 float diffRim = max(0.0, dot(N, lRim));
                 vec3 hRim = normalize(lRim + V);
                 float specRim = pow(max(0.0, dot(N, hRim)), 48.0);
 
                 // Ambient Sky Diffuse
-                float diffAmb = 0.35 + 0.65 * max(0.0, N.y);
+                float diffAmb = 0.45 + 0.55 * max(0.0, N.y);
 
                 // Fresnel Glancing Angle Reflection
                 float NdotV = max(0.0, dot(N, V));
@@ -427,23 +427,23 @@ class FerrofluidScene {
 
                 // Horizon Capillary Wave Reflections (Referencing Image 1)
                 float distCenter = length(p.xz);
-                vec3 horizonGlow = u_ink_glow * (0.3 + 0.7 * sin(distCenter * 14.0 - u_time * 4.0)) * smoothstep(1.8, 4.5, distCenter);
+                vec3 horizonGlow = u_ink_glow * (0.3 + 0.7 * sin(distCenter * 14.0 - u_time * 4.0)) * smoothstep(2.0, 4.5, distCenter);
 
                 // Thin-film iridescent sheen for glancing edges
                 vec3 iridescence = 0.5 + 0.5 * cos(fresnel * 6.28318 * vec3(1.0, 1.25, 1.5) + vec3(0.0, 1.1, 2.2));
                 vec3 specColor = mix(vec3(1.0, 0.98, 0.95), iridescence, 0.45);
 
-                // Ambient Occlusion in crevasses between ridges
-                float ao = clamp(finalH * 1.8 + 0.35, 0.25, 1.0);
+                // Ambient Occlusion
+                float ao = clamp(1.0 - edge * 0.40, 0.60, 1.0);
 
                 // Composite Shading
-                vec3 col = albedo * (diffKey * 0.7 + diffAmb * 0.5 + diffRim * 0.3) * ao;
+                vec3 col = albedo * (diffKey * 0.75 + diffAmb * 0.55 + diffRim * 0.3) * ao;
                 // Gleaming liquid specular highlights
                 col += specColor * (specKey * 1.8 + specRim * 1.2) * (0.9 + u_highs * 0.7);
                 // Fresnel rim reflection
-                col += iridescence * fresnel * (isFerro > 0.5 ? 0.45 : 0.25);
+                col += iridescence * fresnel * (isFerro > 0.5 ? 0.40 : 0.20);
                 // Distant wave horizon sheen
-                col += horizonGlow * fresnel * 0.6;
+                col += horizonGlow * fresnel * 0.5;
 
                 // Drop Shockwave Flash Luminescence
                 if (u_drop_time >= 0.0 && u_drop_time < 0.65) {
