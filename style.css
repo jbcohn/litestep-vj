@@ -925,9 +925,9 @@ html, body {
     text-overflow: ellipsis;
 }
 
-.prop-slider {
+.prop-slider, .ferro-slider {
     flex: 1;
-    accent-color: #38bdf8;
+    accent-color: #f59e0b;
     height: 4px;
     cursor: pointer;
 }

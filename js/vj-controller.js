@@ -184,6 +184,13 @@ class VJController {
         if (s.agitateCluster)    s.agitateCluster();
         if (s.mutate)            s.mutate();
 
+        // If drawer is open, adapt view for active scene
+        var drawer = document.getElementById("proportions-drawer");
+        if (drawer && !drawer.classList.contains("closed")) {
+            if (idx === 5) this.showFerrofluidDrawer();
+            else if (idx === 4) this.showDancerDrawer();
+        }
+
         this.updateHUD();
     }
 
@@ -296,12 +303,26 @@ class VJController {
             if (this.activeSceneIdx === 4 && activeScene && activeScene.palettes) {
                 var curPal = activeScene.palettes[activeScene.paletteIdx];
                 btnTerrain.textContent = "Outfit: " + (curPal ? curPal.name : "Custom") + " (M)";
+            } else if (this.activeSceneIdx === 5 && activeScene && activeScene.palettes && activeScene.params) {
+                var curPal = activeScene.palettes[activeScene.params.paletteIdx];
+                btnTerrain.textContent = "Ink: " + (curPal ? curPal.name : "Orange") + " (M)";
             } else {
                 if (activeScene && activeScene.currentTerrainIdx !== undefined) {
                     this.terrainIdx = activeScene.currentTerrainIdx;
                 }
                 var cadStr = this.mountainBeatCadence > 0 ? (this.mountainBeatCadence + "B") : "Man";
                 btnTerrain.textContent = "Terrain: " + this.terrainNames[this.terrainIdx] + " (" + cadStr + ")";
+            }
+        }
+
+        var btnProp = document.getElementById("btn-proportions");
+        if (btnProp) {
+            if (this.activeSceneIdx === 5) {
+                btnProp.innerHTML = "🧲 Lab (P)";
+                btnProp.title = "Ferrofluid Physics Lab Studio (P)";
+            } else {
+                btnProp.innerHTML = "📐 Studio (P)";
+                btnProp.title = "Dancer Proportions Studio (P)";
             }
         }
 
@@ -593,6 +614,9 @@ class VJController {
                 e.stopPropagation();
                 if (this.activeSceneIdx === 4 && this.scenes[4] && this.scenes[4].cycleOutfit) {
                     this.scenes[4].cycleOutfit();
+                } else if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].mutate) {
+                    this.scenes[5].mutate();
+                    this.updateHUD();
                 } else {
                     if (e.shiftKey) {
                         this.cycleMountainCadence();
@@ -730,6 +754,9 @@ class VJController {
                 e.preventDefault();
                 if (this.activeSceneIdx === 4 && this.scenes[4] && this.scenes[4].cycleOutfit) {
                     this.scenes[4].cycleOutfit();
+                } else if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].mutate) {
+                    this.scenes[5].mutate();
+                    this.updateHUD();
                 } else {
                     this.cycleTerrain();
                 }
@@ -761,15 +788,84 @@ class VJController {
 
         if (willOpen) {
             drawer.classList.remove("closed");
-            // If not currently in Scene 5 (Dancer), switch to Scene 5
-            if (this.activeSceneIdx !== 4) {
-                this.setScene(4);
+            if (this.activeSceneIdx === 5) {
+                // Scene 6 (Ferrofluid Scene) active
+                this.showFerrofluidDrawer();
+            } else {
+                // Default to Scene 5 (Dancer) if on other ambient scenes
+                if (this.activeSceneIdx !== 4) {
+                    this.setScene(4);
+                }
+                this.showDancerDrawer();
             }
-            this.toggleSceneLock(true); // Lock on dancer while tuning
-            this.syncProportionsUI();
         } else {
             drawer.classList.add("closed");
         }
+    }
+
+    showDancerDrawer() {
+        var icon = document.getElementById("drawer-main-icon");
+        var title = document.getElementById("drawer-main-title");
+        var subtitle = document.getElementById("drawer-main-subtitle");
+        var dancerPane = document.getElementById("dancer-studio-pane");
+        var ferroPane = document.getElementById("ferrofluid-studio-pane");
+
+        if (icon) icon.textContent = "📐";
+        if (title) title.textContent = "Dancer Proportions Studio";
+        if (subtitle) subtitle.textContent = "WYSIWYG Real-Time Anatomy Tuner";
+        if (dancerPane) dancerPane.style.display = "block";
+        if (ferroPane) ferroPane.style.display = "none";
+
+        this.toggleSceneLock(true); // Lock on dancer while tuning
+        this.syncProportionsUI();
+    }
+
+    showFerrofluidDrawer() {
+        var icon = document.getElementById("drawer-main-icon");
+        var title = document.getElementById("drawer-main-title");
+        var subtitle = document.getElementById("drawer-main-subtitle");
+        var dancerPane = document.getElementById("dancer-studio-pane");
+        var ferroPane = document.getElementById("ferrofluid-studio-pane");
+
+        if (icon) icon.textContent = "🧲";
+        if (title) title.textContent = "Ferrofluid Physics Lab";
+        if (subtitle) subtitle.textContent = "Real-Time Magnetic Hydrodynamics Studio";
+        if (dancerPane) dancerPane.style.display = "none";
+        if (ferroPane) ferroPane.style.display = "block";
+
+        this.syncFerrofluidUI();
+    }
+
+    syncFerrofluidUI() {
+        var ferroScene = this.scenes[5];
+        if (!ferroScene) return;
+
+        var p = ferroScene.params;
+        var presetSel = document.getElementById("ferro-preset-select");
+        if (presetSel && p.preset) presetSel.value = p.preset;
+
+        var palSel = document.getElementById("ferro-palette-select");
+        if (palSel && p.paletteIdx !== undefined) palSel.value = String(p.paletteIdx);
+
+        var map = [
+            { id: "slider-ferro-feed",        valId: "val-ferro-feed",        key: "feed",        prec: 3 },
+            { id: "slider-ferro-kill",        valId: "val-ferro-kill",        key: "kill",        prec: 3 },
+            { id: "slider-ferro-diffu",       valId: "val-ferro-diffu",       key: "diffU",       prec: 2 },
+            { id: "slider-ferro-diffv",       valId: "val-ferro-diffv",       key: "diffV",       prec: 2 },
+            { id: "slider-ferro-confinement", valId: "val-ferro-confinement", key: "confinement", prec: 2 },
+            { id: "slider-ferro-height",      valId: "val-ferro-height",      key: "fluidHeight", prec: 3 },
+            { id: "slider-ferro-gloss",       valId: "val-ferro-gloss",       key: "gloss",       prec: 1, suffix: "x" },
+            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" }
+        ];
+
+        map.forEach((item) => {
+            var slider = document.getElementById(item.id);
+            var valEl = document.getElementById(item.valId);
+            if (slider && p[item.key] !== undefined) slider.value = p[item.key];
+            if (valEl && p[item.key] !== undefined) {
+                valEl.textContent = Number(p[item.key]).toFixed(item.prec) + (item.suffix || "");
+            }
+        });
     }
 
     syncProportionsUI() {
@@ -1089,6 +1185,22 @@ class VJController {
         var btnCopy = document.getElementById("btn-prop-copy");
         if (btnCopy) {
             btnCopy.addEventListener("click", () => {
+                if (this.activeSceneIdx === 5) {
+                    var ferroScene = this.scenes[5];
+                    if (!ferroScene) return;
+                    var jsonStr = JSON.stringify(ferroScene.params, null, 4);
+                    var codeStr = "// Ferrofluid Physics Parameters:\nthis.params = " + jsonStr + ";";
+                    navigator.clipboard.writeText(codeStr).then(() => {
+                        var toast = document.getElementById("prop-toast");
+                        if (toast) {
+                            toast.textContent = "Copied ferrofluid physics parameters to clipboard!";
+                            toast.classList.remove("hidden");
+                            setTimeout(() => toast.classList.add("hidden"), 2200);
+                        }
+                    }).catch(() => {});
+                    return;
+                }
+
                 var dancerScene = this.scenes[4];
                 if (!dancerScene) return;
                 var targetDancer = dancerScene.getActiveDancer ? dancerScene.getActiveDancer() : dancerScene;
@@ -1098,6 +1210,7 @@ class VJController {
                 navigator.clipboard.writeText(codeStr).then(() => {
                     var toast = document.getElementById("prop-toast");
                     if (toast) {
+                        toast.textContent = "Copied proportions config to clipboard!";
                         toast.classList.remove("hidden");
                         setTimeout(() => toast.classList.add("hidden"), 2200);
                     }
@@ -1109,6 +1222,15 @@ class VJController {
         var btnReset = document.getElementById("btn-prop-reset");
         if (btnReset) {
             btnReset.addEventListener("click", () => {
+                if (this.activeSceneIdx === 5) {
+                    var ferroScene = this.scenes[5];
+                    if (ferroScene && ferroScene.reseed) {
+                        ferroScene.reseed("millefiori", true);
+                        this.syncFerrofluidUI();
+                    }
+                    return;
+                }
+
                 var config = presets["default"];
                 var dancer = this.scenes[4];
                 if (dancer && dancer.applyProportions) {
@@ -1116,6 +1238,89 @@ class VJController {
                 }
                 if (presetSelect) presetSelect.value = "female";
                 this.syncProportionsUI();
+            });
+        }
+
+        // ==============================================================
+        // Ferrofluid Physics Lab Controls Bindings
+        // ==============================================================
+        var ferroPresetSel = document.getElementById("ferro-preset-select");
+        if (ferroPresetSel) {
+            ferroPresetSel.addEventListener("change", (e) => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.reseed) {
+                    ferro.reseed(e.target.value, false);
+                    this.syncFerrofluidUI();
+                }
+            });
+        }
+
+        var ferroPaletteSel = document.getElementById("ferro-palette-select");
+        if (ferroPaletteSel) {
+            ferroPaletteSel.addEventListener("change", (e) => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.setPalette) {
+                    ferro.setPalette(parseInt(e.target.value));
+                }
+            });
+        }
+
+        var ferroSliderMap = [
+            { id: "slider-ferro-feed",        valId: "val-ferro-feed",        key: "feed",        prec: 3 },
+            { id: "slider-ferro-kill",        valId: "val-ferro-kill",        key: "kill",        prec: 3 },
+            { id: "slider-ferro-diffu",       valId: "val-ferro-diffu",       key: "diffU",       prec: 2 },
+            { id: "slider-ferro-diffv",       valId: "val-ferro-diffv",       key: "diffV",       prec: 2 },
+            { id: "slider-ferro-confinement", valId: "val-ferro-confinement", key: "confinement", prec: 2 },
+            { id: "slider-ferro-height",      valId: "val-ferro-height",      key: "fluidHeight", prec: 3 },
+            { id: "slider-ferro-gloss",       valId: "val-ferro-gloss",       key: "gloss",       prec: 1, suffix: "x" },
+            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" }
+        ];
+
+        ferroSliderMap.forEach((item) => {
+            var slider = document.getElementById(item.id);
+            if (slider) {
+                slider.addEventListener("input", (e) => {
+                    var val = parseFloat(e.target.value);
+                    var valEl = document.getElementById(item.valId);
+                    if (valEl) {
+                        valEl.textContent = val.toFixed(item.prec) + (item.suffix || "");
+                    }
+                    var ferro = this.scenes[5];
+                    if (ferro && ferro.setParam) {
+                        ferro.setParam(item.key, val);
+                    }
+                });
+            }
+        });
+
+        var btnFerroReseed = document.getElementById("btn-ferro-reseed");
+        if (btnFerroReseed) {
+            btnFerroReseed.addEventListener("click", () => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.reseed) {
+                    ferro.reseed(null, false);
+                    this.syncFerrofluidUI();
+                }
+            });
+        }
+
+        var btnFerroAgitate = document.getElementById("btn-ferro-agitate");
+        if (btnFerroAgitate) {
+            btnFerroAgitate.addEventListener("click", () => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.agitateFluid) {
+                    ferro.agitateFluid();
+                }
+            });
+        }
+
+        var btnFerroClear = document.getElementById("btn-ferro-clear");
+        if (btnFerroClear) {
+            btnFerroClear.addEventListener("click", () => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.clearFluid) {
+                    ferro.clearFluid();
+                }
             });
         }
 

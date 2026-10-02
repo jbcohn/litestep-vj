@@ -150,6 +150,10 @@
                 <button id="btn-tap-tempo" class="vj-btn" title="Tap Tempo / Sync BPM (T)">
                     <span id="val-bpm">124 BPM</span>
                 </button>
+
+                <button id="btn-proportions" class="vj-btn" title="Toggle Studio / Physics Lab Drawer (P)">
+                    📐 Studio (P)
+                </button>
             </div>
         </div>
 
@@ -159,10 +163,10 @@
         <div id="proportions-drawer" class="proportions-drawer closed">
             <div class="drawer-header">
                 <div class="drawer-title">
-                    <span class="drawer-icon">📐</span>
+                    <span class="drawer-icon" id="drawer-main-icon">📐</span>
                     <div>
-                        <h2>Dancer Proportions Studio</h2>
-                        <span class="drawer-subtitle">WYSIWYG Real-Time Anatomy Tuner</span>
+                        <h2 id="drawer-main-title">Dancer Proportions Studio</h2>
+                        <span class="drawer-subtitle" id="drawer-main-subtitle">WYSIWYG Real-Time Anatomy Tuner</span>
                     </div>
                 </div>
                 <div class="drawer-header-actions">
@@ -180,8 +184,12 @@
 
             <!-- Full Drawer Scrollable Body -->
             <div class="drawer-scroll-body">
-                <!-- Troupe Formation, Sync & Target Dancer -->
-                <div class="drawer-section troupe-section">
+                <!-- ============================================================== -->
+                <!-- PANE A: DANCER PROPORTIONS STUDIO                              -->
+                <!-- ============================================================== -->
+                <div id="dancer-studio-pane">
+                    <!-- Troupe Formation, Sync & Target Dancer -->
+                    <div class="drawer-section troupe-section">
                     <label class="section-label">Troupe Formation &amp; Sync</label>
                     <div class="sub-control">
                         <div class="segmented-control" id="troupe-formation-control">
@@ -532,7 +540,128 @@
                         <!-- Checklist items populated dynamically -->
                     </div>
                 </div>
-            </div>
+
+                <!-- Phone Remote Control Section -->
+                <div class="prop-group phone-remote-group" style="border: 1px solid rgba(56, 189, 248, 0.3); background: rgba(14, 165, 233, 0.05); border-radius: 8px; padding: 10px 12px; margin-top: 10px;">
+                    <div class="group-header" style="margin-bottom: 6px;">
+                        <span style="color: #38bdf8; font-weight: 700;">📱 Phone Remote (LAN)</span>
+                        <a id="link-phone-remote" href="/remote.html" target="_blank" style="color:#38bdf8; font-size:0.68rem; text-decoration:none; font-weight:700; border:1px solid #0284c7; padding:2px 8px; border-radius:4px; background: rgba(2, 132, 199, 0.15);">Open ↗</a>
+                    </div>
+                    <div class="dance-checklist-desc" style="margin-bottom:6px;">
+                        Control this visualizer from Chrome on your phone directly over Wi-Fi (offline):
+                    </div>
+                    <div style="font-family:'SF Mono', Monaco, monospace; font-size:0.72rem; color:#f0abfc; background:#0f172a; padding:6px 10px; border-radius:6px; border:1px solid #334155; word-break:break-all;" id="phone-remote-url">
+                        http://<span id="remote-host-display">localhost</span>:8000/remote.html
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE B: FERROFLUID PHYSICS LAB STUDIO                          -->
+                <!-- ============================================================== -->
+                <div id="ferrofluid-studio-pane" style="display: none;">
+                    <!-- Preset & Palette Section -->
+                    <div class="drawer-section dropdowns-section">
+                        <div class="dropdown-row">
+                            <div class="dropdown-item">
+                                <label class="section-label" for="ferro-preset-select">Physical Formation</label>
+                                <select id="ferro-preset-select" class="drawer-dropdown">
+                                    <option value="millefiori" selected>Millefiori (Reference Photo)</option>
+                                    <option value="labyrinth">Serpentine Labyrinth</option>
+                                    <option value="spikes">Rosensweig Spikes</option>
+                                    <option value="fingers">Petri Dish Radial Fingers</option>
+                                    <option value="solitons">Soliton Beads</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="ferro-palette-select">Ink Substrate</label>
+                                <select id="ferro-palette-select" class="drawer-dropdown">
+                                    <option value="0" selected>0: Vermillion Orange</option>
+                                    <option value="1">1: Golden Amber</option>
+                                    <option value="2">2: Neon Acid Lime</option>
+                                    <option value="3">3: Electric Cyan</option>
+                                    <option value="4">4: Laser Magenta</option>
+                                    <option value="5">5: Deep Ultraviolet</option>
+                                    <option value="6">6: Prismatic Opal</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Magnetic & Field Reaction Section -->
+                    <div class="prop-group">
+                        <div class="group-header">
+                            <span>🧲 Magnetic Hydrodynamics</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="External applied magnetic field B (Feed Rate F)">Applied Field (B)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-feed" min="0.010" max="0.055" step="0.001" value="0.038">
+                            <span class="prop-val" id="val-ferro-feed">0.038</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Dipolar demagnetization & mutual repulsion (Kill Rate k)">Dipole Repulsion (μ)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-kill" min="0.045" max="0.075" step="0.001" value="0.061">
+                            <span class="prop-val" id="val-ferro-kill">0.061</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Interfacial capillary surface tension (Du)">Surface Tension (σ)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-diffu" min="0.06" max="0.28" step="0.01" value="0.16">
+                            <span class="prop-val" id="val-ferro-diffu">0.16</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Magnetic diffusion across non-magnetic medium (Dv)">Magnetic Diff (Dv)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-diffv" min="0.02" max="0.15" step="0.01" value="0.08">
+                            <span class="prop-val" id="val-ferro-diffv">0.08</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Radial magnetic confinement trap">Confinement Trap</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-confinement" min="0.00" max="1.80" step="0.05" value="0.60">
+                            <span class="prop-val" id="val-ferro-confinement">0.60</span>
+                        </div>
+                    </div>
+
+                    <!-- 3D Optics & Macro Studio Section -->
+                    <div class="prop-group">
+                        <div class="group-header">
+                            <span>🌊 3D Surface Relief &amp; Macro Studio</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Tactile 2.5D liquid elevation relief">Fluid Height (Relief)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-height" min="0.020" max="0.160" step="0.005" value="0.075">
+                            <span class="prop-val" id="val-ferro-height">0.075</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Glossy studio specular highlight intensity">Specular Gloss</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-gloss" min="0.5" max="3.0" step="0.1" value="1.8">
+                            <span class="prop-val" id="val-ferro-gloss">1.8x</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Simulation substeps per animation frame">Sim Speed (Substeps)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-speed" min="1" max="8" step="1" value="4">
+                            <span class="prop-val" id="val-ferro-speed">4x</span>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="prop-group" style="padding: 10px 12px;">
+                        <div class="group-header" style="margin-bottom: 8px;">
+                            <span>⚡ Interactive Fluid Actions</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                            <button id="btn-ferro-reseed" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Restart fluid growth from seed">
+                                ↺ Re-Seed
+                            </button>
+                            <button id="btn-ferro-agitate" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Perturb magnetic field">
+                                ⚡ Agitate
+                            </button>
+                            <button id="btn-ferro-clear" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Clear fluid from plate">
+                                🧹 Clear
+                            </button>
+                        </div>
+                        <div class="dance-checklist-desc" style="margin-top: 8px; font-size: 0.68rem; color: #94a3b8;">
+                            Tip: Hold <strong>Shift + Click / Drag</strong> on the canvas to inject new ferrofluid drops interactively.
+                        </div>
+                    </div>
+                </div>
 
             <!-- Toast Notification -->
             <div id="prop-toast" class="prop-toast hidden">
