@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LiteStep VJ vers. 4023</title>
+    
+    <!-- Disable Caching -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Stylesheet -->
+    <script>document.write('<link rel="stylesheet" href="style.css?t=' + Date.now() + '">');</script>
+</head>
+<body>
+    <div id="app-container">
+        <!-- Rear Projection Stage Container (Mirrors Horizontally with ScaleX(-1)) -->
+        <div id="stage-container">
+            <!-- Render Surfaces -->
+            <div id="canvas-three-container"></div>
+            <canvas id="canvas-2d"></canvas>
+
+            <!-- On-Screen Dance Title Overlay (5 Selectable Visual Styles) -->
+            <div id="dance-title-overlay" class="dance-title-container lower_third hidden">
+                <div class="dance-title-content">
+                    <div class="dance-title-tag">NOW DANCING</div>
+                    <div class="dance-title-text" id="dance-title-text">House Basic Bounce</div>
+                    <div class="dance-title-sub" id="dance-title-sub">MELBOURNE SHUFFLE • 126 BPM</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Floating Notifications Toast -->
+        <div id="vj-toast"></div>
+
+        <!-- Floating VJ HUD Cockpit (Bottom Center) -->
+        <div id="vj-hud">
+            <!-- Scene Title & Beat Dot -->
+            <div class="hud-section">
+                <div id="beat-indicator" title="Beat Transient Detected"></div>
+                <div class="hud-title">
+                    <h1>LiteStep VJ <span class="app-version">vers. 4023</span></h1>
+                    <span id="current-scene-name">Form Constants</span>
+                </div>
+            </div>
+
+            <!-- Audio Spectrum Meters -->
+            <div class="hud-section">
+                <div class="spectrum-box" title="Realtime Audio Frequency Energy">
+                    <div class="meter-col">
+                        <div class="meter-bar-track"><div id="meter-sub" class="meter-fill"></div></div>
+                        <span class="meter-label">Sub</span>
+                    </div>
+                    <div class="meter-col">
+                        <div class="meter-bar-track"><div id="meter-bass" class="meter-fill"></div></div>
+                        <span class="meter-label">Bass</span>
+                    </div>
+                    <div class="meter-col">
+                        <div class="meter-bar-track"><div id="meter-mids" class="meter-fill"></div></div>
+                        <span class="meter-label">Mid</span>
+                    </div>
+                    <div class="meter-col">
+                        <div class="meter-bar-track"><div id="meter-highs" class="meter-fill"></div></div>
+                        <span class="meter-label">High</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scene Selector Buttons & Shortcuts -->
+            <div class="hud-section hud-section-scenes">
+                <div class="scene-buttons-row">
+                    <div class="scene-buttons">
+                        <button class="scene-btn active" data-scene="0">
+                            <span class="key-badge">1</span> Mandalas
+                        </button>
+                        <button class="scene-btn" data-scene="1">
+                            <span class="key-badge">2</span> Ridgelines
+                        </button>
+                        <button class="scene-btn" data-scene="2">
+                            <span class="key-badge">3</span> Bubbles
+                        </button>
+                        <button class="scene-btn" data-scene="3">
+                            <span class="key-badge">4</span> Mountain
+                        </button>
+                        <button class="scene-btn" data-scene="4">
+                            <span class="key-badge">5</span> Dancer
+                        </button>
+                    </div>
+                    <button id="btn-scene-lock" class="vj-btn lock-btn" title="Toggle Auto-Cycle vs Hold Scene (L)">
+                        <span id="lock-icon">🔄</span> <span id="lock-label">Auto</span>
+                    </button>
+                </div>
+                <div class="hud-hotkeys-subbar">
+                    <span><strong>Space</strong>: Mutate</span> &bull; 
+                    <span><strong>1&ndash;5</strong>: Scenes</span> &bull; 
+                    <span><strong>L</strong>: Hold Scene</span> &bull; 
+                    <span><strong>X</strong>: Rear Mirror</span> &bull; 
+                    <span><strong>F</strong>: Hide UI</span> &bull; 
+                    <span><strong>B</strong>: Blackout</span> &bull; 
+                    <span><strong>M</strong>: Mountains / Outfits</span> &bull; 
+                    <span><strong>P</strong>: Proportions Studio</span> &bull; 
+                    <span><strong>[ / ]</strong>: Speed</span>
+                </div>
+            </div>
+
+            <!-- Live VJ Action Tools -->
+            <div class="hud-section vj-actions">
+                <button id="btn-mirror-display" class="vj-btn" title="Mirror Display Horizontally for Rear Projection (X)">
+                    🪞 Mirror: Off
+                </button>
+
+                <button id="btn-audio-toggle" class="vj-btn" title="Toggle Live Mic / Line-in or Synthetic Beat">
+                    Audio: Sim Beat
+                </button>
+
+                <button id="btn-terrain" class="vj-btn" title="Click to cycle mountain or dancer outfit (M), Shift-Click or press N to toggle beat cadence">
+                    Terrain: Diablo (32B)
+                </button>
+
+                <div class="sliders-stack">
+                    <div class="slider-group" title="Line &amp; Contour Ribbon Thickness">
+                        <span class="slider-label">Thick</span>
+                        <input type="range" id="slider-line-thick" min="1.5" max="10.0" step="0.5" value="4.0">
+                        <span id="val-line-thick" class="slider-val">4px</span>
+                    </div>
+
+                    <div class="slider-group" title="Audio Gain / Energy Multiplier">
+                        <span class="slider-label">Gain</span>
+                        <input type="range" id="slider-sensitivity" min="0.2" max="3.0" step="0.1" value="1.2">
+                        <span id="val-sensitivity" class="slider-val">1.2x</span>
+                    </div>
+                </div>
+
+                <button id="btn-tap-tempo" class="vj-btn" title="Tap Tempo / Sync BPM (T)">
+                    <span id="val-bpm">124 BPM</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ================================================================== -->
+        <!-- 8. PROPORTIONS & WYSIWYG CHARACTER STUDIO DRAWER (P KEY)          -->
+        <!-- ================================================================== -->
+        <div id="proportions-drawer" class="proportions-drawer closed">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <span class="drawer-icon">📐</span>
+                    <div>
+                        <h2>Dancer Proportions Studio</h2>
+                        <span class="drawer-subtitle">WYSIWYG Real-Time Anatomy Tuner</span>
+                    </div>
+                </div>
+                <div class="drawer-header-actions">
+                    <button id="btn-prop-copy" class="drawer-action-btn highlight" title="Copy Current Proportions as JS Object">
+                        📋 Copy Code
+                    </button>
+                    <button id="btn-prop-reset" class="drawer-action-btn" title="Reset All Proportions to Defaults">
+                        ↺ Reset
+                    </button>
+                    <button id="btn-prop-close" class="drawer-close-btn" title="Close Studio (P)">
+                        ✕
+                    </button>
+                </div>
+            </div>
+
+            <!-- Full Drawer Scrollable Body -->
+            <div class="drawer-scroll-body">
+                <!-- Troupe Formation, Sync & Target Dancer -->
+                <div class="drawer-section troupe-section">
+                    <label class="section-label">Troupe Formation &amp; Sync</label>
+                    <div class="sub-control">
+                        <div class="segmented-control" id="troupe-formation-control">
+                            <button class="seg-btn active" data-formation="1">Solo (1)</button>
+                            <button class="seg-btn" data-formation="2_fwd">Duo Fwd</button>
+                            <button class="seg-btn" data-formation="2_face">Duo Face</button>
+                            <button class="seg-btn" data-formation="3">Trio (3)</button>
+                        </div>
+                    </div>
+                    <div class="prop-row highlight-row" style="margin-top: 8px;">
+                        <span class="prop-label">⏱️ Phase Offset</span>
+                        <input type="range" class="prop-slider" id="troupe-phase-slider" min="0.00" max="0.20" step="0.01" value="0.00">
+                        <span class="prop-val" id="val-troupe-phase">0.00s</span>
+                    </div>
+                    <div class="dropdown-row" style="margin-top: 8px;">
+                        <div class="dropdown-item full-width">
+                            <label class="section-label" for="dancer-target-select">Editing Dancer</label>
+                            <select id="dancer-target-select" class="drawer-dropdown">
+                                <option value="0" selected>Dancer 1 (Lead / Center)</option>
+                                <option value="1">Dancer 2 (Left / Wing)</option>
+                                <option value="2">Dancer 3 (Right / Wing)</option>
+                                <option value="all">All Dancers (Linked)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dropdown Presets (Body Shape & Outfit Palette) -->
+                <div class="drawer-section dropdowns-section">
+                    <div class="dropdown-row">
+                        <div class="dropdown-item">
+                            <label class="section-label" for="preset-select">Body Preset</label>
+                            <select id="preset-select" class="drawer-dropdown">
+                                <option value="female" selected>Default Female</option>
+                                <option value="athletic">Athletic Hero</option>
+                                <option value="slender">Skinny Chic</option>
+                                <option value="cyber_mech">Cyber-Mech</option>
+                            </select>
+                        </div>
+                        <div class="dropdown-item">
+                            <label class="section-label" for="outfit-select">Outfit Palette</label>
+                            <select id="outfit-select" class="drawer-dropdown">
+                                <option value="0" selected>0: Cyber Carnival</option>
+                                <option value="1">1: Tokyo Synthwave</option>
+                                <option value="2">2: Acid Emerald</option>
+                                <option value="3">3: Infrared Blaze</option>
+                                <option value="4">4: Ultraviolet Velvet</option>
+                                <option value="5">5: Gilded Chrome</option>
+                                <option value="6">6: Ice &amp; Fire</option>
+                                <option value="7">7: Obsidian Glow</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Interactive Wardrobe Colors (Bilaterally Symmetric) -->
+                <div class="drawer-section wardrobe-section">
+                    <label class="section-label">Wardrobe Colors (Symmetric)</label>
+                    <div class="wardrobe-grid">
+                        <div class="color-item">
+                            <span class="color-label">👕 Shirt</span>
+                            <div class="color-control">
+                                <input type="color" class="garment-color-picker" data-garment="shirt" value="#a855f7">
+                                <span class="color-hex" id="val-color-shirt">#A855F7</span>
+                            </div>
+                        </div>
+                        <div class="color-item">
+                            <span class="color-label">👖 Pants</span>
+                            <div class="color-control">
+                                <input type="color" class="garment-color-picker" data-garment="pants" value="#3b82f6">
+                                <span class="color-hex" id="val-color-pants">#3B82F6</span>
+                            </div>
+                        </div>
+                        <div class="color-item">
+                            <span class="color-label">👟 Shoes</span>
+                            <div class="color-control">
+                                <input type="color" class="garment-color-picker" data-garment="shoes" value="#10b981">
+                                <span class="color-hex" id="val-color-shoes">#10B981</span>
+                            </div>
+                        </div>
+                        <div class="color-item">
+                            <span class="color-label">🖐️ Skin (Head &amp; Hands)</span>
+                            <div class="color-control">
+                                <input type="color" class="garment-color-picker" data-garment="skin" value="#ffd000">
+                                <span class="color-hex" id="val-color-skin">#FFD000</span>
+                            </div>
+                        </div>
+                        <div class="color-item full-row">
+                            <span class="color-label">✨ Accents &amp; Rings</span>
+                            <div class="color-control">
+                                <input type="color" class="garment-color-picker" data-garment="accent" value="#ffffff">
+                                <span class="color-hex" id="val-color-accent">#FFFFFF</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pose & Camera Angle Controls -->
+                <div class="drawer-section control-bar-section">
+                    <div class="sub-control">
+                        <label class="section-label">Pose Mode</label>
+                        <div class="segmented-control" id="pose-mode-control">
+                            <button class="seg-btn active" data-pose="dance">Dance</button>
+                            <button class="seg-btn" data-pose="pause">Pause</button>
+                            <button class="seg-btn" data-pose="tpose">T-Pose</button>
+                            <button class="seg-btn" data-pose="apose">A-Pose</button>
+                        </div>
+                    </div>
+                    <div class="sub-control">
+                        <label class="section-label">Camera Angle</label>
+                        <div class="segmented-control" id="camera-angle-control">
+                            <button class="seg-btn active" data-cam="orbit">Orbit 360°</button>
+                            <button class="seg-btn" data-cam="front">Front</button>
+                            <button class="seg-btn" data-cam="three_quarter">3/4</button>
+                            <button class="seg-btn" data-cam="side">Side</button>
+                            <button class="seg-btn" data-cam="top">Top</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Head & Torso -->
+                <div class="prop-group">
+                    <div class="group-header">Head &amp; Torso</div>
+                    
+                    <div class="prop-row">
+                        <span class="prop-label">Head</span>
+                        <input type="range" class="prop-slider" data-prop="head" min="8.0" max="22.0" step="0.2" value="12.0">
+                        <span class="prop-val" id="val-prop-head">12.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Neck</span>
+                        <input type="range" class="prop-slider" data-prop="neck" min="3.0" max="12.0" step="0.1" value="5.8">
+                        <span class="prop-val" id="val-prop-neck">5.8</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Chest</span>
+                        <input type="range" class="prop-slider" data-prop="chest" min="10.0" max="28.0" step="0.5" value="14.0">
+                        <span class="prop-val" id="val-prop-chest">14.0</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Bust & breast sphere radius (bilaterally symmetric)">
+                        <span class="prop-label">🍈 Bust Size</span>
+                        <input type="range" class="prop-slider" data-prop="bust" min="0.0" max="16.0" step="0.2" value="8.6">
+                        <span class="prop-val" id="val-prop-bust">8.6</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Bust forward projection out from chest">
+                        <span class="prop-label">🍈 Bust Forward</span>
+                        <input type="range" class="prop-slider" data-prop="bustFwd" min="0.0" max="24.0" step="0.5" value="10.0">
+                        <span class="prop-val" id="val-prop-bustFwd">10.0</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Bust vertical elevation on chest">
+                        <span class="prop-label">🍈 Bust Height</span>
+                        <input type="range" class="prop-slider" data-prop="bustUp" min="-8.0" max="8.0" step="0.2" value="-3.8">
+                        <span class="prop-val" id="val-prop-bustUp">-3.8</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Bust lateral separation between left & right breasts">
+                        <span class="prop-label">🍈 Bust Spacing</span>
+                        <input type="range" class="prop-slider" data-prop="bustWidth" min="2.0" max="16.0" step="0.2" value="7.8">
+                        <span class="prop-val" id="val-prop-bustWidth">7.8</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Spine</span>
+                        <input type="range" class="prop-slider" data-prop="spine" min="6.0" max="18.0" step="0.2" value="9.6">
+                        <span class="prop-val" id="val-prop-spine">9.6</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Pelvis / Waist</span>
+                        <input type="range" class="prop-slider" data-prop="pelvis" min="6.0" max="18.0" step="0.2" value="10.8">
+                        <span class="prop-val" id="val-prop-pelvis">10.8</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Smooth bridge sphere between chest and shoulder to eliminate pouf look">
+                        <span class="prop-label">✨ Clavicle Bridge</span>
+                        <input type="range" class="prop-slider" data-prop="clavicle" min="3.0" max="14.0" step="0.1" value="9.9">
+                        <span class="prop-val" id="val-prop-clavicle">9.9</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Trapezius muscle bubble along the neck-to-shoulder slope">
+                        <span class="prop-label">✨ Trapezius</span>
+                        <input type="range" class="prop-slider" data-prop="traps" min="0.0" max="16.0" step="0.2" value="6.8">
+                        <span class="prop-val" id="val-prop-traps">6.8</span>
+                    </div>
+                </div>
+
+                <!-- Arms & Hands -->
+                <div class="prop-group">
+                    <div class="group-header">Arms &amp; Hands</div>
+                    
+                    <div class="prop-row highlight-row" title="Shoulder joint width / arm span lateral separation (75% default for feminine frame)">
+                        <span class="prop-label">✨ Shoulder Width</span>
+                        <input type="range" class="prop-slider" data-prop="shoulderWidth" min="12.0" max="36.0" step="0.5" value="19.5">
+                        <span class="prop-val" id="val-prop-shoulderWidth">19.5</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Shoulder Joints</span>
+                        <input type="range" class="prop-slider" data-prop="shoulder" min="4.0" max="14.0" step="0.1" value="6.5">
+                        <span class="prop-val" id="val-prop-shoulder">6.5</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Upper Arm (Mid)</span>
+                        <input type="range" class="prop-slider" data-prop="upperArmMid" min="3.0" max="12.0" step="0.1" value="7.2">
+                        <span class="prop-val" id="val-prop-upperArmMid">7.2</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Upper Arm (Ends)</span>
+                        <input type="range" class="prop-slider" data-prop="upperArmEnd" min="3.0" max="10.0" step="0.1" value="6.5">
+                        <span class="prop-val" id="val-prop-upperArmEnd">6.5</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Elbows</span>
+                        <input type="range" class="prop-slider" data-prop="elbow" min="3.0" max="10.0" step="0.1" value="5.8">
+                        <span class="prop-val" id="val-prop-elbow">5.8</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Forearms</span>
+                        <input type="range" class="prop-slider" data-prop="forearm" min="3.0" max="10.0" step="0.1" value="5.0">
+                        <span class="prop-val" id="val-prop-forearm">5.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Hands / Wrists</span>
+                        <input type="range" class="prop-slider" data-prop="hand" min="3.0" max="10.0" step="0.1" value="5.6">
+                        <span class="prop-val" id="val-prop-hand">5.6</span>
+                    </div>
+                </div>
+
+                <!-- Legs & Feet -->
+                <div class="prop-group">
+                    <div class="group-header">Legs &amp; Feet</div>
+                    
+                    <div class="prop-row highlight-row" title="Glutes sphere radius (bilaterally symmetric)">
+                        <span class="prop-label">🍑 Glutes Size</span>
+                        <input type="range" class="prop-slider" data-prop="glutes" min="0.0" max="18.0" step="0.2" value="11.6">
+                        <span class="prop-val" id="val-prop-glutes">11.6</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Glutes rearward projection out from pelvis">
+                        <span class="prop-label">🍑 Glutes Rear</span>
+                        <input type="range" class="prop-slider" data-prop="glutesRear" min="0.0" max="24.0" step="0.5" value="3.5">
+                        <span class="prop-val" id="val-prop-glutesRear">3.5</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Glutes vertical elevation on pelvis">
+                        <span class="prop-label">🍑 Glutes Height</span>
+                        <input type="range" class="prop-slider" data-prop="glutesUp" min="-8.0" max="8.0" step="0.2" value="-1.8">
+                        <span class="prop-val" id="val-prop-glutesUp">-1.8</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Glutes lateral separation between left & right glutes">
+                        <span class="prop-label">🍑 Glutes Spacing</span>
+                        <input type="range" class="prop-slider" data-prop="glutesWidth" min="2.0" max="16.0" step="0.2" value="6.6">
+                        <span class="prop-val" id="val-prop-glutesWidth">6.6</span>
+                    </div>
+                    <div class="prop-row highlight-row" title="Hip joint lateral width / pelvic stance separation">
+                        <span class="prop-label">🦴 Hip Width</span>
+                        <input type="range" class="prop-slider" data-prop="hipWidth" min="8.0" max="30.0" step="0.5" value="12.0">
+                        <span class="prop-val" id="val-prop-hipWidth">12.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Hip Joints</span>
+                        <input type="range" class="prop-slider" data-prop="hip" min="5.0" max="16.0" step="0.2" value="8.0">
+                        <span class="prop-val" id="val-prop-hip">8.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Thigh (Top)</span>
+                        <input type="range" class="prop-slider" data-prop="thighTop" min="4.0" max="16.0" step="0.2" value="8.6">
+                        <span class="prop-val" id="val-prop-thighTop">8.6</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Thigh (Knee)</span>
+                        <input type="range" class="prop-slider" data-prop="thighBot" min="4.0" max="14.0" step="0.2" value="6.8">
+                        <span class="prop-val" id="val-prop-thighBot">6.8</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Knees</span>
+                        <input type="range" class="prop-slider" data-prop="knee" min="3.0" max="10.0" step="0.1" value="6.0">
+                        <span class="prop-val" id="val-prop-knee">6.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Calf (Top)</span>
+                        <input type="range" class="prop-slider" data-prop="calfTop" min="3.0" max="10.0" step="0.1" value="6.0">
+                        <span class="prop-val" id="val-prop-calfTop">6.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Calf (Ankle)</span>
+                        <input type="range" class="prop-slider" data-prop="calfBot" min="3.0" max="8.0" step="0.1" value="5.0">
+                        <span class="prop-val" id="val-prop-calfBot">5.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Ankles</span>
+                        <input type="range" class="prop-slider" data-prop="ankle" min="3.0" max="8.0" step="0.1" value="5.0">
+                        <span class="prop-val" id="val-prop-ankle">5.0</span>
+                    </div>
+                </div>
+
+                <!-- Sneaker Footwear -->
+                <div class="prop-group">
+                    <div class="group-header">Sneaker Footwear (Both Feet)</div>
+                    
+                    <div class="prop-row">
+                        <span class="prop-label">Shoe Length</span>
+                        <input type="range" class="prop-slider" data-prop="shoeLength" min="6.0" max="24.0" step="0.5" value="14.0">
+                        <span class="prop-val" id="val-prop-shoeLength">14.0</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Heel Radius</span>
+                        <input type="range" class="prop-slider" data-prop="shoeHeelR" min="2.0" max="8.0" step="0.1" value="5.6">
+                        <span class="prop-val" id="val-prop-shoeHeelR">5.6</span>
+                    </div>
+                    <div class="prop-row">
+                        <span class="prop-label">Toe Radius</span>
+                        <input type="range" class="prop-slider" data-prop="shoeToeR" min="2.0" max="8.0" step="0.1" value="4.1">
+                        <span class="prop-val" id="val-prop-shoeToeR">4.1</span>
+                    </div>
+                </div>
+
+                <!-- Dance Title Overlay Controls -->
+                <div class="prop-group dance-title-group">
+                    <div class="group-header">
+                        <span>✨ Dance Name Display</span>
+                        <input type="checkbox" id="cb-dance-title-enable" checked style="width:16px; height:16px; accent-color:#a855f7; cursor:pointer;" title="Toggle On-Screen Dance Title">
+                    </div>
+                    <div class="dance-checklist-desc" style="margin-bottom:8px;">
+                        Overlay the current choreography title when the dancers switch moves:
+                    </div>
+                    <div class="prop-row" style="margin-bottom: 6px;">
+                        <span class="prop-label">Visual Style</span>
+                        <select id="sel-dance-title-style" class="prop-select" style="background:#1e1b4b; color:#e2e8f0; border:1px solid #4338ca; border-radius:4px; padding:3px 6px; font-size:0.75rem; flex:1; margin-left:8px;">
+                            <option value="minimal">1. Minimal Fade</option>
+                            <option value="lower_third" selected>2. Cinematic Lower Third</option>
+                            <option value="center_pop">3. Center Stage Pop</option>
+                            <option value="neon_glow">4. Neon Glow</option>
+                            <option value="marquee">5. Marquee Ticker</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                        <button id="btn-preview-dance-title" class="dance-mini-btn" style="flex:1; padding:4px 8px; border-radius:4px; background:#4338ca; border:none; color:#ffffff; font-weight:600; cursor:pointer;" title="Preview Current Style">Preview Title Overlay</button>
+                    </div>
+                </div>
+
+                <!-- Dance Moves Rotation Checklist -->
+                <div class="prop-group dance-rotation-group">
+                    <div class="group-header dance-rot-header">
+                        <span>🕺 Dance Move Rotation (17 Dances)</span>
+                        <div class="dance-rot-actions">
+                            <button id="btn-toggle-dance-lock" class="dance-mini-btn" title="Hold current dance move to teach/practice (toggle auto phrase advance)">Hold Move</button>
+                            <button id="btn-select-all-dances" class="dance-mini-btn" title="Select All">All</button>
+                            <button id="btn-clear-all-dances" class="dance-mini-btn" title="Select None">None</button>
+                        </div>
+                    </div>
+                    <div class="dance-checklist-desc">
+                        Check dances to include in the automatic phrase rotation and spacebar shuffle:
+                    </div>
+                    <div class="dance-checklist" id="dance-checklist-container">
+                        <!-- Checklist items populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Toast Notification -->
+            <div id="prop-toast" class="prop-toast hidden">
+                Copied proportions config to clipboard!
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js for 3D Scenes -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- Visualizer Architecture Scripts with Auto-Timestamping (Bypasses all caches) -->
+    <script>
+        (function() {
+            var ts = Date.now();
+            var scripts = [
+                "data/dem_data.js",
+                "data/aist_clips.js",
+                "js/audio-engine.js",
+                "js/scene-mandalas.js",
+                "js/scene-ridgelines.js",
+                "js/scene-bubbles.js",
+                "js/scene-mountain.js",
+                "js/scene-dancer.js",
+                "js/vj-controller.js"
+            ];
+            for (var i = 0; i < scripts.length; i++) {
+                document.write('<script src="' + scripts[i] + '?t=' + ts + '"><\/script>');
+            }
+        })();
+    </script>
+</body>
+</html>
