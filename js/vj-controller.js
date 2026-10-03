@@ -16,21 +16,18 @@ class VJController {
         this.threeContainer = null;
 
         this.scenes = [];
-        this.activeSceneIdx = 4; // Start with Scene 5: Mocap Dancer
+        this.activeSceneIdx = 5; // Default: Scene 6 Ferrofluid & Inks
         this.previousSceneIdx = -1;
         this.crossfadeAlpha = 1.0;
         this.isCrossfading = false;
         this.crossfadeDuration = 2.4;
 
         // Two-Counter Director:
-        // Counter 1: On every odd step, Dancer (Scene 5 / idx 4) is shown.
-        //            On every even step, Counter 2 is consulted and advanced.
-        // Counter 2: Cycles sequentially through ambient scenes (0=Mandalas, 1=Ridgelines, 2=Bubbles, 3=Mountain, 5=Ferrofluid).
-        this.counter1 = 1; // Start on odd (Dancer)
-        this.counter2 = 0; // Next ambient scene will be Scene 1 (Mandalas / idx 0)
-        this.ambientScenes = [0, 1, 2, 3, 5];
+        this.counter1 = 0;
+        this.counter2 = 0;
+        this.ambientScenes = [5, 0, 1, 2, 3];
 
-        this.autoCycleEnabled = true;
+        this.autoCycleEnabled = false; // ON HOLD by default
         this.timeInCurrentScene = 0;
         this.sceneDuration = 60;
 
@@ -94,6 +91,7 @@ class VJController {
         this.bindEvents();
         this.bindHotkeys();
         this.bindProportionsStudio();
+        this.toggleSceneLock(true); // Default Scene 6 on HOLD
         this.updateHUD();
         this.initRemoteWebSocket();
 
@@ -777,6 +775,20 @@ class VJController {
                 window.audioEngine.sensitivity = Math.max(0.2, window.audioEngine.sensitivity - 0.15);
                 this.updateSensitivityUI();
             }
+            else if (e.code === "Equal" || e.code === "NumpadAdd") {
+                if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].zoomBy) {
+                    e.preventDefault();
+                    this.scenes[5].zoomBy(-0.35);
+                    this.syncFerrofluidUI();
+                }
+            }
+            else if (e.code === "Minus" || e.code === "NumpadSubtract") {
+                if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].zoomBy) {
+                    e.preventDefault();
+                    this.scenes[5].zoomBy(0.35);
+                    this.syncFerrofluidUI();
+                }
+            }
         });
     }
 
@@ -855,17 +867,41 @@ class VJController {
             { id: "slider-ferro-confinement", valId: "val-ferro-confinement", key: "confinement", prec: 2 },
             { id: "slider-ferro-height",      valId: "val-ferro-height",      key: "fluidHeight", prec: 3 },
             { id: "slider-ferro-gloss",       valId: "val-ferro-gloss",       key: "gloss",       prec: 1, suffix: "x" },
-            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" }
+            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" },
+            { id: "slider-ferro-zoom",        valId: "val-ferro-zoom",        key: "zoom",        prec: 1, suffix: "x" }
         ];
 
         map.forEach((item) => {
             var slider = document.getElementById(item.id);
             var valEl = document.getElementById(item.valId);
-            if (slider && p[item.key] !== undefined) slider.value = p[item.key];
-            if (valEl && p[item.key] !== undefined) {
-                valEl.textContent = Number(p[item.key]).toFixed(item.prec) + (item.suffix || "");
+            var val = (item.key === "zoom") ? ferroScene.zoom : p[item.key];
+            if (slider && val !== undefined) slider.value = val;
+            if (valEl && val !== undefined) {
+                valEl.textContent = Number(val).toFixed(item.prec) + (item.suffix || "");
             }
         });
+
+        // Sync Ink Count & interactive Color Pickers
+        var numInks = ferroScene.numInks || 1;
+        document.querySelectorAll("#ferro-ink-count-control .seg-btn").forEach((btn) => {
+            var c = parseInt(btn.getAttribute("data-count") || btn.getAttribute("data-inks"));
+            btn.classList.toggle("active", c === numInks);
+        });
+        for (var i = 1; i <= 3; i++) {
+            var slotEl = document.getElementById("ink-slot-" + i);
+            if (slotEl) {
+                slotEl.style.opacity = (i <= numInks) ? "1.0" : "0.35";
+                slotEl.style.pointerEvents = (i <= numInks) ? "auto" : "none";
+            }
+            var picker = document.getElementById("picker-ink-" + i);
+            var hexVal = document.getElementById("label-ink-" + i) || document.getElementById("val-ink-color-" + i);
+            var inkData = ferroScene.getInkData(i - 1);
+            if (inkData) {
+                var hexStr = "#" + inkData.base.getHexString();
+                if (picker) picker.value = hexStr;
+                if (hexVal) hexVal.textContent = hexStr.toUpperCase();
+            }
+        }
     }
 
     syncProportionsUI() {
@@ -1274,7 +1310,8 @@ class VJController {
             { id: "slider-ferro-confinement", valId: "val-ferro-confinement", key: "confinement", prec: 2 },
             { id: "slider-ferro-height",      valId: "val-ferro-height",      key: "fluidHeight", prec: 3 },
             { id: "slider-ferro-gloss",       valId: "val-ferro-gloss",       key: "gloss",       prec: 1, suffix: "x" },
-            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" }
+            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" },
+            { id: "slider-ferro-zoom",        valId: "val-ferro-zoom",        key: "zoom",        prec: 1, suffix: "x" }
         ];
 
         ferroSliderMap.forEach((item) => {
@@ -1287,9 +1324,49 @@ class VJController {
                         valEl.textContent = val.toFixed(item.prec) + (item.suffix || "");
                     }
                     var ferro = this.scenes[5];
-                    if (ferro && ferro.setParam) {
-                        ferro.setParam(item.key, val);
+                    if (ferro) {
+                        if (item.key === "zoom" && ferro.setZoom) {
+                            ferro.setZoom(val);
+                        } else if (ferro.setParam) {
+                            ferro.setParam(item.key, val);
+                        }
                     }
+                });
+            }
+        });
+
+        // Ferrofluid Ink Count segmented buttons (1, 2, or 3 colors)
+        document.querySelectorAll("#ferro-ink-count-control .seg-btn").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                var count = parseInt(e.currentTarget.getAttribute("data-count") || e.currentTarget.getAttribute("data-inks"));
+                var ferro = this.scenes[5];
+                if (ferro && ferro.setNumInks) {
+                    ferro.setNumInks(count);
+                }
+                document.querySelectorAll("#ferro-ink-count-control .seg-btn").forEach((b) => b.classList.remove("active"));
+                e.currentTarget.classList.add("active");
+                for (var i = 1; i <= 3; i++) {
+                    var slotEl = document.getElementById("ink-slot-" + i);
+                    if (slotEl) {
+                        slotEl.style.opacity = (i <= count) ? "1.0" : "0.35";
+                        slotEl.style.pointerEvents = (i <= count) ? "auto" : "none";
+                    }
+                }
+            });
+        });
+
+        // Ferrofluid Ink Color Pickers
+        [1, 2, 3].forEach((slotNum) => {
+            var picker = document.getElementById("picker-ink-" + slotNum);
+            if (picker) {
+                picker.addEventListener("input", (e) => {
+                    var hex = e.target.value;
+                    var ferro = this.scenes[5];
+                    if (ferro && ferro.setCustomInkColor) {
+                        ferro.setCustomInkColor(slotNum - 1, hex);
+                    }
+                    var badge = document.getElementById("label-ink-" + slotNum) || document.getElementById("val-ink-color-" + slotNum);
+                    if (badge) badge.textContent = hex.toUpperCase();
                 });
             }
         });
@@ -1302,6 +1379,8 @@ class VJController {
                     ferro.reseed(null, false);
                     this.syncFerrofluidUI();
                 }
+                btnFerroReseed.classList.add("pulse");
+                setTimeout(() => btnFerroReseed.classList.remove("pulse"), 200);
             });
         }
 
@@ -1312,6 +1391,8 @@ class VJController {
                 if (ferro && ferro.agitateFluid) {
                     ferro.agitateFluid();
                 }
+                btnFerroAgitate.classList.add("pulse");
+                setTimeout(() => btnFerroAgitate.classList.remove("pulse"), 250);
             });
         }
 
@@ -1322,6 +1403,8 @@ class VJController {
                 if (ferro && ferro.clearFluid) {
                     ferro.clearFluid();
                 }
+                btnFerroClear.classList.add("pulse");
+                setTimeout(() => btnFerroClear.classList.remove("pulse"), 200);
             });
         }
 
@@ -1332,6 +1415,8 @@ class VJController {
                 if (ferro && ferro.resetCamera) {
                     ferro.resetCamera();
                 }
+                btnFerroCenter.classList.add("pulse");
+                setTimeout(() => btnFerroCenter.classList.remove("pulse"), 250);
             });
         }
 

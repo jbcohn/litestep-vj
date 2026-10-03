@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4023</title>
+    <title>LiteStep VJ vers. 4024</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,9 +45,9 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4023</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4024</span></h1>
                     <div class="hud-scene-status">
-                        <span id="current-scene-name">Form Constants</span>
+                        <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
                     </div>
                 </div>
@@ -83,7 +83,7 @@
             <div class="hud-section hud-section-scenes">
                 <div class="scene-buttons-row">
                     <div class="scene-buttons">
-                        <button class="scene-btn active" data-scene="0">
+                        <button class="scene-btn" data-scene="0">
                             <span class="key-badge">1</span> Mandalas
                         </button>
                         <button class="scene-btn" data-scene="1">
@@ -98,12 +98,12 @@
                         <button class="scene-btn" data-scene="4">
                             <span class="key-badge">5</span> Dancer
                         </button>
-                        <button class="scene-btn" data-scene="5">
+                        <button class="scene-btn active" data-scene="5">
                             <span class="key-badge">6</span> Ferrofluid
                         </button>
                     </div>
-                    <button id="btn-scene-lock" class="vj-btn lock-btn" title="Toggle Auto-Cycle vs Hold Scene (L)">
-                        <span id="lock-icon">🔄</span> <span id="lock-label">Auto</span>
+                    <button id="btn-scene-lock" class="vj-btn lock-btn locked" title="Scene is LOCKED (staying on this scene). Press L to auto-cycle">
+                        <span id="lock-icon">🔒</span> <span id="lock-label">Hold</span>
                     </button>
                 </div>
                 <div class="hud-hotkeys-subbar">
@@ -574,7 +574,7 @@
                                 </select>
                             </div>
                             <div class="dropdown-item">
-                                <label class="section-label" for="ferro-palette-select">Ink Substrate</label>
+                                <label class="section-label" for="ferro-palette-select">Ink Substrate Theme</label>
                                 <select id="ferro-palette-select" class="drawer-dropdown">
                                     <option value="0" selected>0: Vermillion Orange</option>
                                     <option value="1">1: Golden Amber</option>
@@ -584,6 +584,41 @@
                                     <option value="5">5: Deep Ultraviolet</option>
                                     <option value="6">6: Prismatic Opal</option>
                                 </select>
+                            </div>
+                        </div>
+
+                        <!-- 1 - 3 Colors Selector & Color Swatches -->
+                        <div class="prop-group" style="margin-top: 10px; padding: 8px 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;">
+                            <div class="group-header" style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 0.76rem; font-weight: 600; color: #f8fafc;">🎨 Ink Substrate Inks</span>
+                                <div class="segmented-control" id="ferro-ink-count-control" style="margin: 0; scale: 0.88;">
+                                    <button class="seg-btn active" data-count="1">1 Color</button>
+                                    <button class="seg-btn" data-count="2">2 Colors</button>
+                                    <button class="seg-btn" data-count="3">3 Colors</button>
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 6px;" id="ferro-ink-pickers-row">
+                                <div class="ink-slot-item" id="ink-slot-1">
+                                    <div style="font-size: 0.68rem; color: #94a3b8; margin-bottom: 2px;">Ink 1</div>
+                                    <div style="display: flex; align-items: center; gap: 4px;">
+                                        <input type="color" id="picker-ink-1" class="garment-color-picker" value="#ff5200" style="width: 26px; height: 26px; border-radius: 6px; cursor: pointer;">
+                                        <span id="label-ink-1" style="font-family: 'SF Mono', monospace; font-size: 0.64rem; color: #cbd5e1;">#FF5200</span>
+                                    </div>
+                                </div>
+                                <div class="ink-slot-item" id="ink-slot-2" style="opacity: 0.35;">
+                                    <div style="font-size: 0.68rem; color: #94a3b8; margin-bottom: 2px;">Ink 2</div>
+                                    <div style="display: flex; align-items: center; gap: 4px;">
+                                        <input type="color" id="picker-ink-2" class="garment-color-picker" value="#00e0ff" style="width: 26px; height: 26px; border-radius: 6px; cursor: pointer;">
+                                        <span id="label-ink-2" style="font-family: 'SF Mono', monospace; font-size: 0.64rem; color: #cbd5e1;">#00E0FF</span>
+                                    </div>
+                                </div>
+                                <div class="ink-slot-item" id="ink-slot-3" style="opacity: 0.35;">
+                                    <div style="font-size: 0.68rem; color: #94a3b8; margin-bottom: 2px;">Ink 3</div>
+                                    <div style="display: flex; align-items: center; gap: 4px;">
+                                        <input type="color" id="picker-ink-3" class="garment-color-picker" value="#ff1f85" style="width: 26px; height: 26px; border-radius: 6px; cursor: pointer;">
+                                        <span id="label-ink-3" style="font-family: 'SF Mono', monospace; font-size: 0.64rem; color: #cbd5e1;">#FF1F85</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -626,6 +661,11 @@
                             <span>🌊 3D Surface Relief &amp; Macro Studio</span>
                         </div>
                         <div class="prop-row">
+                            <span class="prop-label" title="Camera macro distance / zoom level (scroll wheel or pinch)">Camera Zoom (Macro)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-zoom" min="1.5" max="8.0" step="0.1" value="3.8">
+                            <span class="prop-val" id="val-ferro-zoom">3.8x</span>
+                        </div>
+                        <div class="prop-row">
                             <span class="prop-label" title="Tactile 2.5D liquid elevation relief">Fluid Height (Relief)</span>
                             <input type="range" class="ferro-slider" id="slider-ferro-height" min="0.020" max="0.160" step="0.005" value="0.075">
                             <span class="prop-val" id="val-ferro-height">0.075</span>
@@ -663,7 +703,8 @@
                         </div>
                         <div class="dance-checklist-desc" style="margin-top: 10px; font-size: 0.70rem; color: #94a3b8; line-height: 1.4;">
                             • <strong>Option (Alt) + Drag:</strong> Pan camera &amp; position dish anywhere.<br>
-                            • <strong>Double-Click:</strong> Re-center camera on dish.<br>
+                            • <strong>Scroll Wheel / Pinch / Slider:</strong> Zoom camera in &amp; out.<br>
+                            • <strong>Double-Tap / Double-Click / Center:</strong> Re-center camera &amp; reset zoom.<br>
                             • <strong>Shift + Drag:</strong> Inject fresh ferrofluid drops interactively.
                         </div>
                     </div>

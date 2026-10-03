@@ -44,6 +44,16 @@ class FerrofluidScene {
         this.targetPanZ = 0.0;
         this.isPanning = false;
 
+        // Camera Zoom (Mouse wheel, pinch, slider, or UI reset)
+        this.zoom = 3.8;
+        this.targetZoom = 3.8;
+
+        // Tap tracking for responsive double-tap / double-click detection
+        this._lastTapTime = 0;
+        this._lastTapX = 0;
+        this._lastTapY = 0;
+        this._lastTouchTapTime = 0;
+
         // Interactive mouse interaction UV
         this.mouseUV = new THREE.Vector2(-1.0, -1.0);
         this.mouseAction = 0; // 0: none, 1: inject fluid, 2: magnetic pull
@@ -150,6 +160,11 @@ class FerrofluidScene {
             }
         ];
 
+        // Multi-Color Ink Substrates (1 - 3 colors)
+        this.numInks = 1; // 1, 2, or 3
+        this.inkSlots = [0, 3, 4]; // Default: Slot 1: Orange, Slot 2: Cyan, Slot 3: Magenta
+        this.customInkColors = [null, null, null];
+
         // GPGPU Simulation Engine
         this.simSize = 512;
         this.rtA = null;
@@ -171,6 +186,53 @@ class FerrofluidScene {
         this.isInitialized = false;
         this.dropIntensity = 0.0;
         this.dropTime = 999.0;
+    }
+
+    getInkData(slotIdx) {
+        slotIdx = Math.max(0, Math.min(2, slotIdx));
+        if (this.customInkColors[slotIdx]) {
+            var hex = this.customInkColors[slotIdx].replace("#", "");
+            var r = parseInt(hex.substring(0, 2), 16) / 255.0;
+            var g = parseInt(hex.substring(2, 4), 16) / 255.0;
+            var b = parseInt(hex.substring(4, 6), 16) / 255.0;
+            return {
+                color: [r, g, b],
+                glow:  [r * 0.70, g * 0.70, b * 0.70]
+            };
+        }
+        var palIdx = this.inkSlots[slotIdx] !== undefined ? this.inkSlots[slotIdx] : 0;
+        return this.palettes[palIdx] || this.palettes[0];
+    }
+
+    setNumInks(count) {
+        this.numInks = Math.max(1, Math.min(3, parseInt(count) || 1));
+        this.syncInkUniforms();
+    }
+
+    setCustomInkColor(slotIdx, hex) {
+        this.customInkColors[slotIdx] = hex;
+        this.syncInkUniforms();
+    }
+
+    setInkSlot(slotIdx, palIdx) {
+        this.inkSlots[slotIdx] = palIdx;
+        this.customInkColors[slotIdx] = null;
+        this.syncInkUniforms();
+    }
+
+    syncInkUniforms() {
+        if (!this.displayMaterial) return;
+        var u = this.displayMaterial.uniforms;
+        var d1 = this.getInkData(0);
+        var d2 = this.getInkData(1);
+        var d3 = this.getInkData(2);
+        u.u_num_inks.value = this.numInks;
+        u.u_ink_color1.value.set(...d1.color);
+        u.u_ink_glow1.value.set(...d1.glow);
+        u.u_ink_color2.value.set(...d2.color);
+        u.u_ink_glow2.value.set(...d2.glow);
+        u.u_ink_color3.value.set(...d3.color);
+        u.u_ink_glow3.value.set(...d3.glow);
     }
 
     init(container) {
@@ -287,6 +349,7 @@ class FerrofluidScene {
                 u_pitch: { value: this.pitch },
                 u_yaw: { value: this.yaw },
                 u_pan: { value: new THREE.Vector2(0.0, 0.0) },
+                u_cam_dist: { value: this.zoom },
                 u_fluid_height: { value: this.params.fluidHeight },
                 u_gloss: { value: this.params.gloss },
                 u_sub: { value: 0.0 },
@@ -294,8 +357,13 @@ class FerrofluidScene {
                 u_highs: { value: 0.0 },
                 u_tension: { value: 0.0 },
                 u_alpha: { value: 1.0 },
-                u_ink_color: { value: new THREE.Vector3(...pal.color) },
-                u_ink_glow:  { value: new THREE.Vector3(...pal.glow) }
+                u_num_inks:   { value: this.numInks },
+                u_ink_color1: { value: new THREE.Vector3(...this.getInkData(0).color) },
+                u_ink_glow1:  { value: new THREE.Vector3(...this.getInkData(0).glow) },
+                u_ink_color2: { value: new THREE.Vector3(...this.getInkData(1).color) },
+                u_ink_glow2:  { value: new THREE.Vector3(...this.getInkData(1).glow) },
+                u_ink_color3: { value: new THREE.Vector3(...this.getInkData(2).color) },
+                u_ink_glow3:  { value: new THREE.Vector3(...this.getInkData(2).glow) }
             },
             depthWrite: false,
             depthTest: false
@@ -386,10 +454,14 @@ class FerrofluidScene {
                     }
                 }
 
-                // Musical Drop Shockwave Pulse
+                // Dynamic Magnetic Agitation / Drop Shockwave
                 if (u_drop > 0.01) {
-                    float shockRing = sin(r * 32.0) * exp(-r * 4.0);
-                    newV = clamp(newV + shockRing * u_drop * 0.12, 0.0, 1.0);
+                    float angle = atan(centered.y, centered.x);
+                    float spiralWave = sin(r * 28.0 - angle * 3.0 - u_sub * 4.0);
+                    float ringWave = sin(r * 32.0) * exp(-r * 3.5);
+                    float disturbance = (spiralWave * 0.65 + ringWave * 0.35) * smoothstep(0.48, 0.05, r);
+                    newV = clamp(newV + disturbance * u_drop * 0.28, 0.0, 1.0);
+                    newU = clamp(newU - disturbance * u_drop * 0.20, 0.0, 1.0);
                 }
 
                 gl_FragColor = vec4(newU, newV, 0.0, 1.0);
@@ -408,6 +480,7 @@ class FerrofluidScene {
             uniform float u_pitch;
             uniform float u_yaw;
             uniform vec2  u_pan;
+            uniform float u_cam_dist;
             uniform float u_fluid_height;
             uniform float u_gloss;
             uniform float u_sub;
@@ -416,10 +489,53 @@ class FerrofluidScene {
             uniform float u_tension;
             uniform float u_alpha;
 
-            uniform vec3 u_ink_color;
-            uniform vec3 u_ink_glow;
+            uniform int  u_num_inks;
+            uniform vec3 u_ink_color1;
+            uniform vec3 u_ink_glow1;
+            uniform vec3 u_ink_color2;
+            uniform vec3 u_ink_glow2;
+            uniform vec3 u_ink_color3;
+            uniform vec3 u_ink_glow3;
 
             #define PI 3.14159265359
+
+            // Multi-Color Ink Substrate Mixer (1, 2, or 3 colors)
+            void getInkColorsAt(vec2 p, out vec3 baseColor, out vec3 glowColor) {
+                if (u_num_inks <= 1) {
+                    baseColor = u_ink_color1;
+                    glowColor = u_ink_glow1;
+                    return;
+                }
+                
+                if (u_num_inks == 2) {
+                    // Organic duo boundary undulating across the plate
+                    float sep = p.x * 0.72 + sin(p.y * 1.6 + 0.5) * 0.45;
+                    float blend = smoothstep(-0.35, 0.35, sep);
+                    baseColor = mix(u_ink_color1, u_ink_color2, blend);
+                    glowColor = mix(u_ink_glow1, u_ink_glow2, blend);
+                    return;
+                }
+                
+                // 3 Inks: Tri-sector organic swirl partitioned across 120-degree regions
+                float angle = atan(p.y, p.x) + sin(length(p) * 2.4) * 0.40;
+                float normA = fract((angle + PI) / (2.0 * PI)); // [0, 1]
+                
+                float d1 = abs(normA - 0.166);
+                if (d1 > 0.5) d1 = 1.0 - d1;
+                float d2 = abs(normA - 0.500);
+                if (d2 > 0.5) d2 = 1.0 - d2;
+                float d3 = abs(normA - 0.833);
+                if (d3 > 0.5) d3 = 1.0 - d3;
+                
+                float w1 = max(0.0, 0.38 - d1);
+                float w2 = max(0.0, 0.38 - d2);
+                float w3 = max(0.0, 0.38 - d3);
+                float sumW = w1 + w2 + w3 + 0.0001;
+                w1 /= sumW; w2 /= sumW; w3 /= sumW;
+                
+                baseColor = u_ink_color1 * w1 + u_ink_color2 * w2 + u_ink_color3 * w3;
+                glowColor = u_ink_glow1 * w1 + u_ink_glow2 * w2 + u_ink_glow3 * w3;
+            }
 
             // Sample simulated fluid concentration at world coordinates p (xz plane)
             float sampleFluid(vec2 p) {
@@ -462,7 +578,7 @@ class FerrofluidScene {
                 vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
 
                 // Tabletop Macro Camera Setup (~76 deg overhead angle)
-                float camDist = 3.8;
+                float camDist = u_cam_dist;
                 float pitch = u_pitch;
                 float yaw = u_yaw + u_time * 0.020; // Gentle serene macro turntable rotation
 
@@ -475,8 +591,8 @@ class FerrofluidScene {
                 vec3 rd = normalize(uv.x * right + uv.y * up + 1.72 * fwd);
 
                 // Raymarch 2.5D Liquid Surface
-                float t = 1.3;
-                float tMax = 7.0;
+                float t = max(0.15, camDist - 2.8);
+                float tMax = camDist + 3.5;
                 vec3 p = ro;
                 bool hit = false;
                 float finalH = 0.0;
@@ -535,10 +651,11 @@ class FerrofluidScene {
                 // Deep obsidian magnetite black:
                 vec3 ferroColor = vec3(0.012, 0.013, 0.016);
 
-                // Vibrant Single-Color Ink Substrate:
-                vec3 inkBase = u_ink_color;
+                // Vibrant Single- or Multi-Color Ink Substrates:
+                vec3 inkBase, inkGlow;
+                getInkColorsAt(p.xz, inkBase, inkGlow);
                 // Subsurface optical depth gradient
-                vec3 inkFloor = mix(u_ink_glow, inkBase, clamp(v * 3.5, 0.0, 1.0));
+                vec3 inkFloor = mix(inkGlow, inkBase, clamp(v * 3.5, 0.0, 1.0));
 
                 // Meniscus Contact Border: Dark liquid rim where black fluid contacts ink
                 float meniscus = smoothstep(0.06, 0.0, abs(v - 0.28));
@@ -578,7 +695,7 @@ class FerrofluidScene {
                 // Fresnel Glancing Sheen
                 float NdotV = max(0.0, dot(N, V));
                 float fresnel = pow(1.0 - NdotV, 3.8);
-                vec3 fresnelSheen = mix(vec3(1.0, 0.98, 0.95), u_ink_color * 1.2, 0.25);
+                vec3 fresnelSheen = mix(vec3(1.0, 0.98, 0.95), inkBase * 1.2, 0.25);
 
                 // Ambient Occlusion in Valleys
                 float ao = clamp(1.0 - meniscus * 0.35, 0.65, 1.0);
@@ -608,6 +725,20 @@ class FerrofluidScene {
     _bindMouseEvents() {
         window.addEventListener("mousedown", (e) => {
             if (e.target.closest("#vj-hud") || e.target.closest("#proportions-drawer")) return;
+
+            // Double-tap / double-click detection (works on mouse, trackpad, and touchscreen)
+            var now = performance.now();
+            if (now - this._lastTapTime < 320 && Math.hypot(e.clientX - this._lastTapX, e.clientY - this._lastTapY) < 35) {
+                this.resetCamera();
+                this._lastTapTime = 0;
+                this.isDragging = false;
+                this.isPanning = false;
+                return;
+            }
+            this._lastTapTime = now;
+            this._lastTapX = e.clientX;
+            this._lastTapY = e.clientY;
+
             if (e.altKey || e.button === 1) {
                 // Option (Alt) key or middle click: Camera Pan
                 this.isPanning = true;
@@ -640,13 +771,13 @@ class FerrofluidScene {
                 var forwardZ = Math.cos(currentYaw);
                 var rightX = Math.cos(currentYaw);
                 var rightZ = Math.sin(currentYaw);
-                var scale = 0.0055;
+                var scale = 0.0055 * (this.zoom / 3.8);
 
                 this.targetPanX += (-dx * rightX + dy * forwardX) * scale;
                 this.targetPanZ += (-dx * rightZ + dy * forwardZ) * scale;
 
-                this.targetPanX = Math.max(-3.5, Math.min(3.5, this.targetPanX));
-                this.targetPanZ = Math.max(-3.5, Math.min(3.5, this.targetPanZ));
+                this.targetPanX = Math.max(-4.0, Math.min(4.0, this.targetPanX));
+                this.targetPanZ = Math.max(-4.0, Math.min(4.0, this.targetPanZ));
             } else if (this.isDragging) {
                 var dx = e.clientX - this.lastMouseX;
                 var dy = e.clientY - this.lastMouseY;
@@ -671,17 +802,83 @@ class FerrofluidScene {
             }
         });
 
+        // Mouse Wheel & Trackpad 2-finger scroll zoom
+        window.addEventListener("wheel", (e) => {
+            if (e.target.closest("#vj-hud") || e.target.closest("#proportions-drawer")) return;
+            e.preventDefault();
+            var delta = e.deltaY * 0.0035;
+            this.targetZoom = Math.max(1.5, Math.min(8.0, this.targetZoom + delta));
+            this._syncZoomUI();
+        }, { passive: false });
+
+        // Touch Pinch-to-Zoom & Double-Tap
+        var lastPinchDist = null;
+        window.addEventListener("touchmove", (e) => {
+            if (e.target.closest("#vj-hud") || e.target.closest("#proportions-drawer")) return;
+            if (e.touches && e.touches.length === 2) {
+                var dx = e.touches[0].clientX - e.touches[1].clientX;
+                var dy = e.touches[0].clientY - e.touches[1].clientY;
+                var dist = Math.hypot(dx, dy);
+                if (lastPinchDist !== null) {
+                    var diff = lastPinchDist - dist;
+                    this.targetZoom = Math.max(1.5, Math.min(8.0, this.targetZoom + diff * 0.012));
+                    this._syncZoomUI();
+                }
+                lastPinchDist = dist;
+            }
+        }, { passive: true });
+
+        window.addEventListener("touchend", (e) => {
+            lastPinchDist = null;
+            if (e.target.closest("#vj-hud") || e.target.closest("#proportions-drawer")) return;
+            if (e.changedTouches && e.changedTouches.length === 1) {
+                var now = performance.now();
+                if (now - this._lastTouchTapTime < 320) {
+                    this.resetCamera();
+                    this._lastTouchTapTime = 0;
+                } else {
+                    this._lastTouchTapTime = now;
+                }
+            }
+        });
+
         window.addEventListener("dblclick", (e) => {
             if (e.target.closest("#vj-hud") || e.target.closest("#proportions-drawer")) return;
             this.resetCamera();
         });
     }
 
-    resetCamera() {
+    _syncZoomUI() {
+        var slider = document.getElementById("slider-ferro-zoom");
+        var valEl = document.getElementById("val-ferro-zoom");
+        if (slider) slider.value = this.targetZoom;
+        if (valEl) valEl.textContent = this.targetZoom.toFixed(1) + "x";
+    }
+
+    setZoom(val) {
+        this.targetZoom = Math.max(1.5, Math.min(8.0, val));
+        this._syncZoomUI();
+    }
+
+    zoomBy(delta) {
+        this.targetZoom = Math.max(1.5, Math.min(8.0, this.targetZoom + delta));
+        this._syncZoomUI();
+    }
+
+    resetCamera(immediate) {
         this.targetPanX = 0.0;
         this.targetPanZ = 0.0;
+        this.targetZoom = 3.8;
         this.targetPitch = 1.33;
         this.targetYaw = 0.0;
+        if (immediate) {
+            this.panX = 0.0;
+            this.panZ = 0.0;
+            this.zoom = 3.8;
+            this.pitch = 1.33;
+            this.yaw = 0.0;
+        }
+        this._syncZoomUI();
     }
 
     _updateMouseUV(clientX, clientY, action) {
@@ -691,7 +888,7 @@ class FerrofluidScene {
         var uvX = (clientX - 0.5 * w) / aspectMin;
         var uvY = ((h - clientY) - 0.5 * h) / aspectMin;
 
-        var camDist = 3.8;
+        var camDist = this.zoom;
         var pitch = this.pitch;
         var yaw = this.yaw + this.time * 0.020;
 
@@ -912,11 +1109,12 @@ class FerrofluidScene {
 
         this.time += dt;
 
-        // Smooth Camera Orbit & Pan Interpolation
-        this.pitch += (this.targetPitch - this.pitch) * 0.12;
-        this.yaw   += (this.targetYaw - this.yaw) * 0.12;
-        this.panX  += (this.targetPanX - this.panX) * 0.12;
-        this.panZ  += (this.targetPanZ - this.panZ) * 0.12;
+        // Smooth Camera Orbit, Pan & Zoom Interpolation
+        this.pitch += (this.targetPitch - this.pitch) * 0.15;
+        this.yaw   += (this.targetYaw - this.yaw) * 0.15;
+        this.panX  += (this.targetPanX - this.panX) * 0.15;
+        this.panZ  += (this.targetPanZ - this.panZ) * 0.15;
+        this.zoom  += (this.targetZoom - this.zoom) * 0.15;
 
         // Drop Shockwave Tracker
         if (this.dropTime < 5.0) {
@@ -939,6 +1137,7 @@ class FerrofluidScene {
             u.u_pitch.value = this.pitch;
             u.u_yaw.value = this.yaw;
             u.u_pan.value.set(this.panX, this.panZ);
+            u.u_cam_dist.value = this.zoom;
             u.u_fluid_height.value = this.params.fluidHeight;
             u.u_gloss.value = this.params.gloss;
             u.u_sub.value = audio ? audio.sub : 0.0;
@@ -968,13 +1167,12 @@ class FerrofluidScene {
     }
 
     mutate() {
-        // Cycle single-color ink palette
+        // Cycle ink palette
         this.params.paletteIdx = (this.params.paletteIdx + 1) % this.palettes.length;
-        var pal = this.palettes[this.params.paletteIdx];
-        if (this.displayMaterial) {
-            this.displayMaterial.uniforms.u_ink_color.value.set(...pal.color);
-            this.displayMaterial.uniforms.u_ink_glow.value.set(...pal.glow);
-        }
+        this.setInkSlot(0, this.params.paletteIdx);
+        this.setInkSlot(1, (this.params.paletteIdx + 3) % this.palettes.length);
+        this.setInkSlot(2, (this.params.paletteIdx + 4) % this.palettes.length);
+        this.syncInkUniforms();
 
         // Perturb fluid slightly with magnetic vibration
         this.agitateFluid();
@@ -989,12 +1187,15 @@ class FerrofluidScene {
     }
 
     agitateFluid() {
-        // Momentary magnetic perturbation
+        // Dynamic magnetic perturbation & agitation
+        this.dropTime = 0.0;
+        this.dropIntensity = 1.0;
         if (this.simMaterial) {
-            this.simMaterial.uniforms.u_drop.value = 0.65;
+            var origFeed = this.params.feed;
+            this.simMaterial.uniforms.u_feed.value = origFeed + 0.015;
             setTimeout(() => {
-                if (this.simMaterial) this.simMaterial.uniforms.u_drop.value = 0.0;
-            }, 180);
+                if (this.simMaterial) this.simMaterial.uniforms.u_feed.value = this.params.feed;
+            }, 280);
         }
     }
 
@@ -1047,11 +1248,8 @@ class FerrofluidScene {
 
     setPalette(idx) {
         this.params.paletteIdx = Math.max(0, Math.min(this.palettes.length - 1, idx));
-        var pal = this.palettes[this.params.paletteIdx];
-        if (this.displayMaterial) {
-            this.displayMaterial.uniforms.u_ink_color.value.set(...pal.color);
-            this.displayMaterial.uniforms.u_ink_glow.value.set(...pal.glow);
-        }
+        this.setInkSlot(0, this.params.paletteIdx);
+        this.syncInkUniforms();
     }
 
     destroy() {
