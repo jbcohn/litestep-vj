@@ -848,6 +848,27 @@ class VJController {
         this.syncFerrofluidUI();
     }
 
+    /** Ferrofluid Physics Lab slider definitions (shared by binding and sync). */
+    _ferroSliderMap() {
+        return [
+            { id: "slider-ferro-field",     valId: "val-ferro-field",     key: "field",          prec: 2 },
+            { id: "slider-ferro-tension",   valId: "val-ferro-tension",   key: "tension",        prec: 2 },
+            { id: "slider-ferro-thickness", valId: "val-ferro-thickness", key: "thickness",      prec: 1 },
+            { id: "slider-ferro-volume",    valId: "val-ferro-volume",    key: "volume",         prec: 2 },
+            { id: "slider-ferro-spike",     valId: "val-ferro-spike",     key: "spikeThreshold", prec: 2 },
+            { id: "slider-ferro-pull",      valId: "val-ferro-pull",      key: "magnetPull",     prec: 2 },
+            { id: "slider-ferro-focus",     valId: "val-ferro-focus",     key: "focus",          prec: 2 },
+            { id: "slider-ferro-flow",      valId: "val-ferro-flow",      key: "flow",           prec: 1, suffix: "x" },
+            { id: "slider-ferro-density",   valId: "val-ferro-density",   key: "density",        prec: 2 },
+            { id: "slider-ferro-zoom",      valId: "val-ferro-zoom",      key: "zoom",           prec: 1, suffix: "x" },
+            { id: "slider-ferro-height",    valId: "val-ferro-height",    key: "fluidHeight",    prec: 3 },
+            { id: "slider-ferro-gloss",     valId: "val-ferro-gloss",     key: "gloss",          prec: 1, suffix: "x" },
+            { id: "slider-ferro-dof",       valId: "val-ferro-dof",       key: "dof",            prec: 2 },
+            { id: "slider-ferro-speed",     valId: "val-ferro-speed",     key: "simSpeed",       prec: 0, suffix: "x" },
+            { id: "slider-ferro-audio",     valId: "val-ferro-audio",     key: "audioReact",     prec: 2, suffix: "x" }
+        ];
+    }
+
     syncFerrofluidUI() {
         var ferroScene = this.scenes[5];
         if (!ferroScene) return;
@@ -859,22 +880,13 @@ class VJController {
         var palSel = document.getElementById("ferro-palette-select");
         if (palSel && p.paletteIdx !== undefined) palSel.value = String(p.paletteIdx);
 
-        var map = [
-            { id: "slider-ferro-feed",        valId: "val-ferro-feed",        key: "feed",        prec: 3 },
-            { id: "slider-ferro-kill",        valId: "val-ferro-kill",        key: "kill",        prec: 3 },
-            { id: "slider-ferro-diffu",       valId: "val-ferro-diffu",       key: "diffU",       prec: 2 },
-            { id: "slider-ferro-diffv",       valId: "val-ferro-diffv",       key: "diffV",       prec: 2 },
-            { id: "slider-ferro-confinement", valId: "val-ferro-confinement", key: "confinement", prec: 2 },
-            { id: "slider-ferro-height",      valId: "val-ferro-height",      key: "fluidHeight", prec: 3 },
-            { id: "slider-ferro-gloss",       valId: "val-ferro-gloss",       key: "gloss",       prec: 1, suffix: "x" },
-            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" },
-            { id: "slider-ferro-zoom",        valId: "val-ferro-zoom",        key: "zoom",        prec: 1, suffix: "x" }
-        ];
+        var magSel = document.getElementById("ferro-magnet-mode");
+        if (magSel && p.magnetMode) magSel.value = p.magnetMode;
 
-        map.forEach((item) => {
+        this._ferroSliderMap().forEach((item) => {
             var slider = document.getElementById(item.id);
             var valEl = document.getElementById(item.valId);
-            var val = (item.key === "zoom") ? ferroScene.zoom : p[item.key];
+            var val = (item.key === "zoom") ? ferroScene.targetZoom : p[item.key];
             if (slider && val !== undefined) slider.value = val;
             if (valEl && val !== undefined) {
                 valEl.textContent = Number(val).toFixed(item.prec) + (item.suffix || "");
@@ -896,10 +908,9 @@ class VJController {
             var picker = document.getElementById("picker-ink-" + i);
             var hexVal = document.getElementById("label-ink-" + i) || document.getElementById("val-ink-color-" + i);
             var inkData = ferroScene.getInkData(i - 1);
-            if (inkData) {
-                var hexStr = "#" + inkData.base.getHexString();
-                if (picker) picker.value = hexStr;
-                if (hexVal) hexVal.textContent = hexStr.toUpperCase();
+            if (inkData && inkData.hex) {
+                if (picker) picker.value = inkData.hex;
+                if (hexVal) hexVal.textContent = inkData.hex.toUpperCase();
             }
         }
     }
@@ -1261,7 +1272,7 @@ class VJController {
                 if (this.activeSceneIdx === 5) {
                     var ferroScene = this.scenes[5];
                     if (ferroScene) {
-                        if (ferroScene.reseed) ferroScene.reseed("millefiori", true);
+                        if (ferroScene.reseed) ferroScene.reseed("labyrinth", true);
                         if (ferroScene.resetCamera) ferroScene.resetCamera();
                         this.syncFerrofluidUI();
                     }
@@ -1298,23 +1309,20 @@ class VJController {
                 var ferro = this.scenes[5];
                 if (ferro && ferro.setPalette) {
                     ferro.setPalette(parseInt(e.target.value));
+                    this.syncFerrofluidUI();
                 }
             });
         }
 
-        var ferroSliderMap = [
-            { id: "slider-ferro-feed",        valId: "val-ferro-feed",        key: "feed",        prec: 3 },
-            { id: "slider-ferro-kill",        valId: "val-ferro-kill",        key: "kill",        prec: 3 },
-            { id: "slider-ferro-diffu",       valId: "val-ferro-diffu",       key: "diffU",       prec: 2 },
-            { id: "slider-ferro-diffv",       valId: "val-ferro-diffv",       key: "diffV",       prec: 2 },
-            { id: "slider-ferro-confinement", valId: "val-ferro-confinement", key: "confinement", prec: 2 },
-            { id: "slider-ferro-height",      valId: "val-ferro-height",      key: "fluidHeight", prec: 3 },
-            { id: "slider-ferro-gloss",       valId: "val-ferro-gloss",       key: "gloss",       prec: 1, suffix: "x" },
-            { id: "slider-ferro-speed",       valId: "val-ferro-speed",       key: "simSpeed",    prec: 0, suffix: "x" },
-            { id: "slider-ferro-zoom",        valId: "val-ferro-zoom",        key: "zoom",        prec: 1, suffix: "x" }
-        ];
+        var ferroMagnetSel = document.getElementById("ferro-magnet-mode");
+        if (ferroMagnetSel) {
+            ferroMagnetSel.addEventListener("change", (e) => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.setMagnetMode) ferro.setMagnetMode(e.target.value);
+            });
+        }
 
-        ferroSliderMap.forEach((item) => {
+        this._ferroSliderMap().forEach((item) => {
             var slider = document.getElementById(item.id);
             if (slider) {
                 slider.addEventListener("input", (e) => {

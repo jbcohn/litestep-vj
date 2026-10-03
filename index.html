@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4024</title>
+    <title>LiteStep VJ vers. 4025</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,7 +45,7 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4024</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4025</span></h1>
                     <div class="hud-scene-status">
                         <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
@@ -623,42 +623,70 @@
                         </div>
                     </div>
 
-                    <!-- Magnetic & Field Reaction Section -->
+                    <!-- Magnetic & Fluid Physics Section -->
                     <div class="prop-group">
                         <div class="group-header">
-                            <span>🧲 Magnetic Hydrodynamics</span>
+                            <span>🧲 Magnetic Field &amp; Fluid Physics</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Applied external magnetic field strength B (drives labyrinthine instability)">Magnetic Field Strength</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-feed" min="0.010" max="0.055" step="0.001" value="0.038">
-                            <span class="prop-val" id="val-ferro-feed">0.038</span>
+                            <span class="prop-label" title="Applied magnetic field H. Dipolar repulsion grows with H²: higher field → finer, more branched labyrinth; lower field → fluid relaxes into droplets">Field Strength (H)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-field" min="0.00" max="2.00" step="0.01" value="1.00">
+                            <span class="prop-val" id="val-ferro-field">1.00</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Capillary surface tension and fluid viscosity (smooths and fattens channels)">Fluid Viscosity / Tension</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-diffu" min="0.06" max="0.28" step="0.01" value="0.16">
-                            <span class="prop-val" id="val-ferro-diffu">0.16</span>
+                            <span class="prop-label" title="Interfacial surface tension: smooths and fattens channels, resists fingering">Surface Tension (σ)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-tension" min="0.50" max="2.50" step="0.05" value="1.20">
+                            <span class="prop-val" id="val-ferro-tension">1.20</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Mutual dipolar repulsion between magnetized fluid elements (sets channel spacing)">Dipole Repulsion (μ)</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-kill" min="0.045" max="0.075" step="0.001" value="0.061">
-                            <span class="prop-val" id="val-ferro-kill">0.061</span>
+                            <span class="prop-label" title="Fluid layer thickness: sets the range of the dipole–dipole interaction and therefore the channel spacing">Film Thickness</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-thickness" min="1.5" max="4.5" step="0.1" value="3.0">
+                            <span class="prop-val" id="val-ferro-thickness">3.0</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Magnetic diffusion across the non-magnetic ink medium">Magnetic Field Diffusion</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-diffv" min="0.02" max="0.15" step="0.01" value="0.08">
-                            <span class="prop-val" id="val-ferro-diffv">0.08</span>
+                            <span class="prop-label" title="Ferrofluid volume fraction of the dish (conserved by the solver; changing it adds or removes fluid)">Ferrofluid Volume</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-volume" min="0.06" max="0.45" step="0.01" value="0.25">
+                            <span class="prop-val" id="val-ferro-volume">0.25</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Radial magnetic confinement gradient holding fluid over the magnet">Confinement Trap</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-confinement" min="0.00" max="1.80" step="0.05" value="0.60">
-                            <span class="prop-val" id="val-ferro-confinement">0.60</span>
+                            <span class="prop-label" title="Critical field Hc of the Rosensweig instability. When H exceeds Hc a hexagonal lattice of spikes erupts on the fluid">Spike Threshold (Hc)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-spike" min="0.60" max="2.50" step="0.05" value="1.60">
+                            <span class="prop-val" id="val-ferro-spike">1.60</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Kelvin body force pulling ferrofluid toward the strongest field (the magnet)">Magnet Pull</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-pull" min="0.00" max="1.20" step="0.02" value="0.25">
+                            <span class="prop-val" id="val-ferro-pull">0.25</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="How concentrated the magnet's field is (0 = uniform coil field, 1 = small point magnet)">Field Focus</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-focus" min="0.00" max="1.00" step="0.05" value="0.55">
+                            <span class="prop-val" id="val-ferro-focus">0.55</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Magnet under the dish: fixed at center, slowly orbiting, or positioned manually with ⌘-drag">Magnet</span>
+                            <select id="ferro-magnet-mode" class="drawer-dropdown" style="flex: 1; margin-left: 8px;">
+                                <option value="center">Fixed (center)</option>
+                                <option value="orbit" selected>Slow orbit</option>
+                                <option value="manual">Manual (⌘-drag)</option>
+                            </select>
                         </div>
                     </div>
 
-                    <!-- 3D Optics & Macro Studio Section -->
+                    <!-- Ink Flow & Optics Section -->
                     <div class="prop-group">
                         <div class="group-header">
-                            <span>🌊 3D Surface Relief &amp; Macro Studio</span>
+                            <span>🌊 Ink Flow &amp; Macro Optics</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Coupling between ferrofluid interface motion and the incompressible ink flow that carries the dyes">Ink Flow</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-flow" min="0.0" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-ferro-flow">1.0x</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Dye concentration (Beer-Lambert absorption): higher = deeper, more saturated ink">Ink Density</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-density" min="0.30" max="3.00" step="0.05" value="1.20">
+                            <span class="prop-val" id="val-ferro-density">1.20</span>
                         </div>
                         <div class="prop-row">
                             <span class="prop-label" title="Camera macro distance / zoom level (scroll wheel or pinch)">Camera Zoom (Macro)</span>
@@ -666,19 +694,29 @@
                             <span class="prop-val" id="val-ferro-zoom">3.8x</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Tactile 2.5D liquid elevation relief">Fluid Height (Relief)</span>
+                            <span class="prop-label" title="Height of the ferrofluid relief and spikes">Fluid Height (Relief)</span>
                             <input type="range" class="ferro-slider" id="slider-ferro-height" min="0.020" max="0.160" step="0.005" value="0.075">
                             <span class="prop-val" id="val-ferro-height">0.075</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Glossy studio specular highlight intensity">Specular Gloss</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-gloss" min="0.5" max="3.0" step="0.1" value="1.8">
-                            <span class="prop-val" id="val-ferro-gloss">1.8x</span>
+                            <span class="prop-label" title="Studio softbox and ring-light intensity">Studio Lights</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-gloss" min="0.2" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-ferro-gloss">1.0x</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Simulation substeps per animation frame">Sim Speed (Substeps)</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-speed" min="1" max="8" step="1" value="4">
-                            <span class="prop-val" id="val-ferro-speed">4x</span>
+                            <span class="prop-label" title="Macro lens depth of field (autofocus at screen center)">Depth of Field</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-dof" min="0.00" max="1.50" step="0.05" value="0.60">
+                            <span class="prop-val" id="val-ferro-dof">0.60</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Physics substeps per frame (simulation speed)">Sim Speed (Substeps)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-speed" min="1" max="12" step="1" value="6">
+                            <span class="prop-val" id="val-ferro-speed">6x</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="How strongly the music drives the field: buildup ramps H, pre-drop cuts it, drop slams it past Hc, kicks pulse it">Audio Reactivity</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-audio" min="0.00" max="2.00" step="0.05" value="1.00">
+                            <span class="prop-val" id="val-ferro-audio">1.00x</span>
                         </div>
                     </div>
 
@@ -688,24 +726,25 @@
                             <span>⚡ Interactive Fluid Actions</span>
                         </div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                            <button id="btn-ferro-reseed" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Restart fluid growth from seed">
+                            <button id="btn-ferro-reseed" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Restart from a fresh drop and re-energize the magnet">
                                 ↺ Re-Seed
                             </button>
-                            <button id="btn-ferro-agitate" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Perturb magnetic field">
+                            <button id="btn-ferro-agitate" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Shake the magnet / jitter the field">
                                 ⚡ Agitate
                             </button>
                             <button id="btn-ferro-center" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Center camera on dish (reset pan)">
                                 🎯 Center Dish
                             </button>
-                            <button id="btn-ferro-clear" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Clear fluid from plate">
+                            <button id="btn-ferro-clear" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Remove all ferrofluid (then Shift-drag to add)">
                                 🧹 Clear Fluid
                             </button>
                         </div>
                         <div class="dance-checklist-desc" style="margin-top: 10px; font-size: 0.70rem; color: #94a3b8; line-height: 1.4;">
+                            • <strong>⌘ (Cmd) + Drag:</strong> Move the magnet under the dish.<br>
+                            • <strong>Shift + Drag:</strong> Drip in more ferrofluid.<br>
                             • <strong>Option (Alt) + Drag:</strong> Pan camera &amp; position dish anywhere.<br>
-                            • <strong>Scroll Wheel / Pinch / Slider:</strong> Zoom camera in &amp; out.<br>
-                            • <strong>Double-Tap / Double-Click / Center:</strong> Re-center camera &amp; reset zoom.<br>
-                            • <strong>Shift + Drag:</strong> Inject fresh ferrofluid drops interactively.
+                            • <strong>Scroll Wheel / Pinch / + −:</strong> Zoom camera in &amp; out.<br>
+                            • <strong>Double-Tap / Double-Click / Center:</strong> Re-center camera &amp; reset zoom.
                         </div>
                     </div>
                 </div> <!-- End of ferrofluid-studio-pane -->
