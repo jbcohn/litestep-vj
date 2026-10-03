@@ -1224,8 +1224,9 @@ class VJController {
             btnReset.addEventListener("click", () => {
                 if (this.activeSceneIdx === 5) {
                     var ferroScene = this.scenes[5];
-                    if (ferroScene && ferroScene.reseed) {
-                        ferroScene.reseed("millefiori", true);
+                    if (ferroScene) {
+                        if (ferroScene.reseed) ferroScene.reseed("millefiori", true);
+                        if (ferroScene.resetCamera) ferroScene.resetCamera();
                         this.syncFerrofluidUI();
                     }
                     return;
@@ -1320,6 +1321,16 @@ class VJController {
                 var ferro = this.scenes[5];
                 if (ferro && ferro.clearFluid) {
                     ferro.clearFluid();
+                }
+            });
+        }
+
+        var btnFerroCenter = document.getElementById("btn-ferro-center");
+        if (btnFerroCenter) {
+            btnFerroCenter.addEventListener("click", () => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.resetCamera) {
+                    ferro.resetCamera();
                 }
             });
         }

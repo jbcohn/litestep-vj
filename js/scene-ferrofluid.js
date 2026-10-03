@@ -37,6 +37,13 @@ class FerrofluidScene {
         this.lastMouseX = 0;
         this.lastMouseY = 0;
 
+        // Camera Pan (Option + drag, middle mouse drag, or UI reset)
+        this.panX = 0.0;
+        this.panZ = 0.0;
+        this.targetPanX = 0.0;
+        this.targetPanZ = 0.0;
+        this.isPanning = false;
+
         // Interactive mouse interaction UV
         this.mouseUV = new THREE.Vector2(-1.0, -1.0);
         this.mouseAction = 0; // 0: none, 1: inject fluid, 2: magnetic pull
@@ -279,6 +286,7 @@ class FerrofluidScene {
                 u_time: { value: 0.0 },
                 u_pitch: { value: this.pitch },
                 u_yaw: { value: this.yaw },
+                u_pan: { value: new THREE.Vector2(0.0, 0.0) },
                 u_fluid_height: { value: this.params.fluidHeight },
                 u_gloss: { value: this.params.gloss },
                 u_sub: { value: 0.0 },
@@ -399,6 +407,7 @@ class FerrofluidScene {
             uniform float u_time;
             uniform float u_pitch;
             uniform float u_yaw;
+            uniform vec2  u_pan;
             uniform float u_fluid_height;
             uniform float u_gloss;
             uniform float u_sub;
@@ -457,8 +466,8 @@ class FerrofluidScene {
                 float pitch = u_pitch;
                 float yaw = u_yaw + u_time * 0.020; // Gentle serene macro turntable rotation
 
-                vec3 ro = vec3(camDist * sin(yaw) * cos(pitch), camDist * sin(pitch), -camDist * cos(yaw) * cos(pitch));
-                vec3 target = vec3(0.0, 0.02, 0.0);
+                vec3 target = vec3(u_pan.x, 0.02, u_pan.y);
+                vec3 ro = target + vec3(camDist * sin(yaw) * cos(pitch), camDist * sin(pitch), -camDist * cos(yaw) * cos(pitch));
 
                 vec3 fwd = normalize(target - ro);
                 vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), fwd));
@@ -599,18 +608,46 @@ class FerrofluidScene {
     _bindMouseEvents() {
         window.addEventListener("mousedown", (e) => {
             if (e.target.closest("#vj-hud") || e.target.closest("#proportions-drawer")) return;
-            if (e.shiftKey || e.button === 2) {
+            if (e.altKey || e.button === 1) {
+                // Option (Alt) key or middle click: Camera Pan
+                this.isPanning = true;
+                this.isDragging = false;
+                this.lastMouseX = e.clientX;
+                this.lastMouseY = e.clientY;
+            } else if (e.shiftKey || e.button === 2) {
                 // Shift-click: inject fluid at pointer
+                this.isPanning = false;
+                this.isDragging = false;
                 this._updateMouseUV(e.clientX, e.clientY, 1);
             } else {
+                // Standard Left-click: Orbit
                 this.isDragging = true;
+                this.isPanning = false;
                 this.lastMouseX = e.clientX;
                 this.lastMouseY = e.clientY;
             }
         });
 
         window.addEventListener("mousemove", (e) => {
-            if (this.isDragging) {
+            if (this.isPanning || (this.isDragging && e.altKey)) {
+                var dx = e.clientX - this.lastMouseX;
+                var dy = e.clientY - this.lastMouseY;
+                this.lastMouseX = e.clientX;
+                this.lastMouseY = e.clientY;
+
+                var currentYaw = this.yaw;
+                var forwardX = -Math.sin(currentYaw);
+                var forwardZ = Math.cos(currentYaw);
+                var rightX = Math.cos(currentYaw);
+                var rightZ = Math.sin(currentYaw);
+                var scale = 0.0055;
+
+                this.targetPanX += (-dx * rightX + dy * forwardX) * scale;
+                this.targetPanZ += (-dx * rightZ + dy * forwardZ) * scale;
+
+                this.targetPanX = Math.max(-3.5, Math.min(3.5, this.targetPanX));
+                this.targetPanZ = Math.max(-3.5, Math.min(3.5, this.targetPanZ));
+            } else if (this.isDragging) {
                 var dx = e.clientX - this.lastMouseX;
                 var dy = e.clientY - this.lastMouseY;
                 this.lastMouseX = e.clientX;
@@ -625,6 +662,7 @@ class FerrofluidScene {
 
         window.addEventListener("mouseup", () => {
             this.isDragging = false;
+            this.isPanning = false;
             this.mouseAction = 0;
             this.mouseUV.set(-1.0, -1.0);
             if (this.simMaterial) {
@@ -632,16 +670,81 @@ class FerrofluidScene {
                 this.simMaterial.uniforms.u_mouse_pos.value.set(-1.0, -1.0);
             }
         });
+
+        window.addEventListener("dblclick", (e) => {
+            if (e.target.closest("#vj-hud") || e.target.closest("#proportions-drawer")) return;
+            this.resetCamera();
+        });
+    }
+
+    resetCamera() {
+        this.targetPanX = 0.0;
+        this.targetPanZ = 0.0;
+        this.targetPitch = 1.33;
+        this.targetYaw = 0.0;
     }
 
     _updateMouseUV(clientX, clientY, action) {
-        var nx = clientX / window.innerWidth;
-        var ny = 1.0 - (clientY / window.innerHeight);
-        this.mouseUV.set(nx, ny);
-        this.mouseAction = action;
+        var w = window.innerWidth;
+        var h = window.innerHeight;
+        var aspectMin = Math.min(w, h);
+        var uvX = (clientX - 0.5 * w) / aspectMin;
+        var uvY = ((h - clientY) - 0.5 * h) / aspectMin;
+
+        var camDist = 3.8;
+        var pitch = this.pitch;
+        var yaw = this.yaw + this.time * 0.020;
+
+        var targetX = this.panX;
+        var targetY = 0.02;
+        var targetZ = this.panZ;
+
+        var roX = targetX + camDist * Math.sin(yaw) * Math.cos(pitch);
+        var roY = targetY + camDist * Math.sin(pitch);
+        var roZ = targetZ - camDist * Math.cos(yaw) * Math.cos(pitch);
+
+        var fwdX = targetX - roX, fwdY = targetY - roY, fwdZ = targetZ - roZ;
+        var fwdLen = Math.hypot(fwdX, fwdY, fwdZ);
+        if (fwdLen > 0.0001) { fwdX /= fwdLen; fwdY /= fwdLen; fwdZ /= fwdLen; }
+
+        var rX = fwdZ, rY = 0, rZ = -fwdX;
+        var rLen = Math.hypot(rX, rZ);
+        if (rLen > 0.0001) { rX /= rLen; rZ /= rLen; }
+
+        var upX = fwdY * rZ - fwdZ * rY;
+        var upY = fwdZ * rX - fwdX * rZ;
+        var upZ = fwdX * rY - fwdY * rX;
+
+        var rdX = uvX * rX + uvY * upX + 1.72 * fwdX;
+        var rdY = uvX * rY + uvY * upY + 1.72 * fwdY;
+        var rdZ = uvX * rZ + uvY * upZ + 1.72 * fwdZ;
+        var rdLen = Math.hypot(rdX, rdY, rdZ);
+        if (rdLen > 0.0001) { rdX /= rdLen; rdY /= rdLen; rdZ /= rdLen; }
+
+        if (Math.abs(rdY) > 0.001) {
+            var t = -roY / rdY;
+            if (t > 0) {
+                var hitX = roX + rdX * t;
+                var hitZ = roZ + rdZ * t;
+                var simU = hitX * 0.208 + 0.5;
+                var simV = hitZ * 0.208 + 0.5;
+                if (simU >= 0.0 && simU <= 1.0 && simV >= 0.0 && simV <= 1.0) {
+                    this.mouseUV.set(simU, simV);
+                    this.mouseAction = action;
+                    if (this.simMaterial) {
+                        this.simMaterial.uniforms.u_mouse_pos.value.copy(this.mouseUV);
+                        this.simMaterial.uniforms.u_mouse_action.value = action;
+                    }
+                    return;
+                }
+            }
+        }
+
+        this.mouseUV.set(-1.0, -1.0);
+        this.mouseAction = 0;
         if (this.simMaterial) {
-            this.simMaterial.uniforms.u_mouse_pos.value.copy(this.mouseUV);
-            this.simMaterial.uniforms.u_mouse_action.value = action;
+            this.simMaterial.uniforms.u_mouse_pos.value.set(-1.0, -1.0);
+            this.simMaterial.uniforms.u_mouse_action.value = 0;
         }
     }
 
@@ -809,9 +912,11 @@ class FerrofluidScene {
 
         this.time += dt;
 
-        // Smooth Camera Orbit Interpolation
+        // Smooth Camera Orbit & Pan Interpolation
         this.pitch += (this.targetPitch - this.pitch) * 0.12;
         this.yaw   += (this.targetYaw - this.yaw) * 0.12;
+        this.panX  += (this.targetPanX - this.panX) * 0.12;
+        this.panZ  += (this.targetPanZ - this.panZ) * 0.12;
 
         // Drop Shockwave Tracker
         if (this.dropTime < 5.0) {
@@ -833,6 +938,7 @@ class FerrofluidScene {
             u.u_time.value = this.time;
             u.u_pitch.value = this.pitch;
             u.u_yaw.value = this.yaw;
+            u.u_pan.value.set(this.panX, this.panZ);
             u.u_fluid_height.value = this.params.fluidHeight;
             u.u_gloss.value = this.params.gloss;
             u.u_sub.value = audio ? audio.sub : 0.0;

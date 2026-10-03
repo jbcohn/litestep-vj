@@ -554,11 +554,12 @@
                         http://<span id="remote-host-display">localhost</span>:8000/remote.html
                     </div>
                 </div>
+            </div> <!-- End of dancer-studio-pane -->
 
-                <!-- ============================================================== -->
-                <!-- PANE B: FERROFLUID PHYSICS LAB STUDIO                          -->
-                <!-- ============================================================== -->
-                <div id="ferrofluid-studio-pane" style="display: none;">
+            <!-- ============================================================== -->
+            <!-- PANE B: FERROFLUID PHYSICS LAB STUDIO                          -->
+            <!-- ============================================================== -->
+            <div id="ferrofluid-studio-pane" style="display: none;">
                     <!-- Preset & Palette Section -->
                     <div class="drawer-section dropdowns-section">
                         <div class="dropdown-row">
@@ -593,27 +594,27 @@
                             <span>🧲 Magnetic Hydrodynamics</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="External applied magnetic field B (Feed Rate F)">Applied Field (B)</span>
+                            <span class="prop-label" title="Applied external magnetic field strength B (drives labyrinthine instability)">Magnetic Field Strength</span>
                             <input type="range" class="ferro-slider" id="slider-ferro-feed" min="0.010" max="0.055" step="0.001" value="0.038">
                             <span class="prop-val" id="val-ferro-feed">0.038</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Dipolar demagnetization & mutual repulsion (Kill Rate k)">Dipole Repulsion (μ)</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-kill" min="0.045" max="0.075" step="0.001" value="0.061">
-                            <span class="prop-val" id="val-ferro-kill">0.061</span>
-                        </div>
-                        <div class="prop-row">
-                            <span class="prop-label" title="Interfacial capillary surface tension (Du)">Surface Tension (σ)</span>
+                            <span class="prop-label" title="Capillary surface tension and fluid viscosity (smooths and fattens channels)">Fluid Viscosity / Tension</span>
                             <input type="range" class="ferro-slider" id="slider-ferro-diffu" min="0.06" max="0.28" step="0.01" value="0.16">
                             <span class="prop-val" id="val-ferro-diffu">0.16</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Magnetic diffusion across non-magnetic medium (Dv)">Magnetic Diff (Dv)</span>
+                            <span class="prop-label" title="Mutual dipolar repulsion between magnetized fluid elements (sets channel spacing)">Dipole Repulsion (μ)</span>
+                            <input type="range" class="ferro-slider" id="slider-ferro-kill" min="0.045" max="0.075" step="0.001" value="0.061">
+                            <span class="prop-val" id="val-ferro-kill">0.061</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Magnetic diffusion across the non-magnetic ink medium">Magnetic Field Diffusion</span>
                             <input type="range" class="ferro-slider" id="slider-ferro-diffv" min="0.02" max="0.15" step="0.01" value="0.08">
                             <span class="prop-val" id="val-ferro-diffv">0.08</span>
                         </div>
                         <div class="prop-row">
-                            <span class="prop-label" title="Radial magnetic confinement trap">Confinement Trap</span>
+                            <span class="prop-label" title="Radial magnetic confinement gradient holding fluid over the magnet">Confinement Trap</span>
                             <input type="range" class="ferro-slider" id="slider-ferro-confinement" min="0.00" max="1.80" step="0.05" value="0.60">
                             <span class="prop-val" id="val-ferro-confinement">0.60</span>
                         </div>
@@ -646,22 +647,28 @@
                         <div class="group-header" style="margin-bottom: 8px;">
                             <span>⚡ Interactive Fluid Actions</span>
                         </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                             <button id="btn-ferro-reseed" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Restart fluid growth from seed">
                                 ↺ Re-Seed
                             </button>
                             <button id="btn-ferro-agitate" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Perturb magnetic field">
                                 ⚡ Agitate
                             </button>
+                            <button id="btn-ferro-center" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Center camera on dish (reset pan)">
+                                🎯 Center Dish
+                            </button>
                             <button id="btn-ferro-clear" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Clear fluid from plate">
-                                🧹 Clear
+                                🧹 Clear Fluid
                             </button>
                         </div>
-                        <div class="dance-checklist-desc" style="margin-top: 8px; font-size: 0.68rem; color: #94a3b8;">
-                            Tip: Hold <strong>Shift + Click / Drag</strong> on the canvas to inject new ferrofluid drops interactively.
+                        <div class="dance-checklist-desc" style="margin-top: 10px; font-size: 0.70rem; color: #94a3b8; line-height: 1.4;">
+                            • <strong>Option (Alt) + Drag:</strong> Pan camera &amp; position dish anywhere.<br>
+                            • <strong>Double-Click:</strong> Re-center camera on dish.<br>
+                            • <strong>Shift + Drag:</strong> Inject fresh ferrofluid drops interactively.
                         </div>
                     </div>
-                </div>
+                </div> <!-- End of ferrofluid-studio-pane -->
+            </div> <!-- End of drawer-scroll-body -->
 
             <!-- Toast Notification -->
             <div id="prop-toast" class="prop-toast hidden">
