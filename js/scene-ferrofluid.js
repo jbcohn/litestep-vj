@@ -232,9 +232,23 @@ class FerrofluidScene {
         this.passScene.add(this.quad);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "high-performance" });
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this.renderer.setSize(width, height);
         this.renderer.autoClear = true;
+
+        var gl = this.renderer.getContext();
+        if (gl) {
+            gl.getExtension("OES_texture_float");
+            gl.getExtension("OES_texture_float_linear");
+            gl.getExtension("OES_texture_half_float");
+            gl.getExtension("OES_texture_half_float_linear");
+            gl.getExtension("EXT_color_buffer_float");
+        }
+        if (this.renderer.extensions) {
+            this.renderer.extensions.get("OES_texture_float_linear");
+            this.renderer.extensions.get("OES_texture_half_float_linear");
+            this.renderer.extensions.get("EXT_color_buffer_float");
+        }
 
         var el = this.renderer.domElement;
         el.style.position = "absolute";
@@ -274,6 +288,7 @@ class FerrofluidScene {
         var isWebGL2 = this.renderer.capabilities && this.renderer.capabilities.isWebGL2;
         this.floatType = isWebGL2 ? THREE.FloatType : THREE.HalfFloatType;
         var F = this.floatType, N = this.N, NL = this.NL, ND = this.ND;
+        var HF = THREE.HalfFloatType;
 
         this.rt.phaseA = this._makeRT(N, N, F);
         this.rt.phaseB = this._makeRT(N, N, F);
@@ -291,10 +306,10 @@ class FerrofluidScene {
         this.rt.div = this._makeRT(NL, NL, F);
         this.rt.pA = this._makeRT(NL, NL, F);
         this.rt.pB = this._makeRT(NL, NL, F);
-        this.rt.dyeA = this._makeRT(ND, ND, F);
-        this.rt.dyeB = this._makeRT(ND, ND, F);
-        this.rt.hblur = this._makeRT(N, N, F);
-        this.rt.height = this._makeRT(N, N, F);
+        this.rt.dyeA = this._makeRT(ND, ND, HF);
+        this.rt.dyeB = this._makeRT(ND, ND, HF);
+        this.rt.hblur = this._makeRT(N, N, HF);
+        this.rt.height = this._makeRT(N, N, HF);
         this.rt.color = null; // created in _resizeColorTarget
     }
 
@@ -1355,7 +1370,12 @@ void main() {
     float h = max(hFerro, hInk) + pow(max(k - abs(hFerro - hInk), 0.0), 2.0) / (4.0 * k);
 
     float rr = length(vUv - 0.5);
-    if (rr > 0.462) { h = -0.01; hInk = 0.0; hFerro = -0.01; rho0 = 0.0; }
+    float wallFade = smoothstep(0.460, 0.448, rr);
+    hFerro *= wallFade;
+    hInk *= wallFade;
+    h *= wallFade;
+    rho0 *= wallFade;
+    if (rr > 0.462) { h = 0.0; hInk = 0.0; hFerro = 0.0; rho0 = 0.0; }
     gl_FragColor = vec4(h, rho0, hInk, hFerro);
 }
 `;
@@ -1375,16 +1395,27 @@ const float WS = 0.208;
 const float TURNTABLE = 0.012;
 vec2 toUV(vec2 p) { return p * WS + 0.5; }
 
+vec2 smoothUV(vec2 uv, vec2 res) {
+    vec2 p = uv * res - 0.5;
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    f = f * f * (3.0 - 2.0 * f);
+    return (i + f + 0.5) / res;
+}
+
 float rimH(float d) { float x = (d - 2.255) / 0.032; return 0.055 * exp(-x * x); }
 
 float heightAt(vec2 p) {
     float d = length(p);
-    float h = (d < 2.30) ? texture2D(u_height, toUV(p)).r : -0.01;
-    return h + rimH(d);
+    float rim = rimH(d);
+    if (d > 2.22) return rim;
+    vec2 uv = smoothUV(toUV(p), vec2(384.0));
+    float fluidH = texture2D(u_height, uv).r;
+    return max(fluidH, rim);
 }
 
 vec3 normalAt(vec2 p) {
-    float e = 0.0125;
+    float e = 0.009;
     float hR = heightAt(p + vec2(e, 0.0));
     float hL = heightAt(p - vec2(e, 0.0));
     float hU = heightAt(p + vec2(0.0, e));
@@ -1434,17 +1465,17 @@ void main() {
     float t = max(0.0, (ro.y - hTop) / -rd.y);
     float tPrev = t;
     bool hit = false;
-    for (int i = 0; i < 72; i++) {
+    for (int i = 0; i < 84; i++) {
         vec3 p = ro + rd * t;
         float dy = p.y - heightAt(p.xz);
         if (dy < 0.0) { hit = true; break; }
         tPrev = t;
-        t += clamp(dy * 0.6, 0.0015, 0.05);
+        t += clamp(dy * 0.55, 0.001, 0.04);
         if (p.y < -0.05) break;
     }
     if (!hit) { gl_FragColor = vec4(bg, 60.0); return; }
     float ta = tPrev, tb = t;
-    for (int j = 0; j < 6; j++) {
+    for (int j = 0; j < 8; j++) {
         float tm = 0.5 * (ta + tb);
         vec3 pm = ro + rd * tm;
         if (pm.y < heightAt(pm.xz)) tb = tm; else ta = tm;
@@ -1458,39 +1489,46 @@ void main() {
     vec3 R = reflect(rd, N);
     float NdV = max(dot(N, V), 0.0);
     float fres5 = pow(1.0 - NdV, 5.0);
-    vec3 col;
 
-    if (d > 2.29) {
-        // Dark table outside the dish
-        col = vec3(0.010) + env(R, C) * (0.03 + 0.97 * fres5) * 0.35;
-    } else if (d > 2.215) {
-        // Glass dish rim
-        col = vec3(0.012) + env(R, C) * (0.04 + 0.96 * fres5) + u_ink_avg * 0.08;
-    } else {
-        vec4 Hs = texture2D(u_height, toUV(p.xz));
-        float ferroMask = smoothstep(-0.0025, 0.0025, Hs.a - Hs.b);
+    // 1. Dark table outside the dish
+    vec3 colTable = vec3(0.010) + env(R, C) * (0.03 + 0.97 * fres5) * 0.35;
 
-        // Ferrofluid: black dielectric mirror (oil carrier, magnetite absorbs all transmitted light)
-        float Ff = 0.045 + 0.955 * fres5;
-        vec3 colF = env(R, C) * Ff + vec3(0.004);
+    // 2. Glass dish rim
+    vec3 colRim = vec3(0.012) + env(R, C) * (0.04 + 0.96 * fres5) + u_ink_avg * 0.08;
 
-        // Ink: translucent dyed water with refraction and Beer-Lambert absorption
-        float Fi = 0.02 + 0.98 * fres5;
-        vec3 rt = refract(rd, N, 1.0 / 1.33);
-        float depth = max(Hs.b, 0.002);
-        float cosT = max(-rt.y, 0.25);
-        vec2 pb = p.xz + rt.xz / cosT * depth;
-        vec2 uvb = toUV(pb);
-        vec3 dye = texture2D(u_dye, uvb).rgb;
-        vec3 logA = dye.r * log(max(u_ink1, vec3(0.003))) + dye.g * log(max(u_ink2, vec3(0.003))) + dye.b * log(max(u_ink3, vec3(0.003)));
-        float path = depth * (1.0 / cosT + 1.0);
-        vec3 trans = exp(logA * u_density * path / (2.0 * 0.32 * u_H));
-        float ferroUnder = texture2D(u_height, uvb).g;
-        float floorLight = 0.95 * (1.0 - 0.85 * ferroUnder);
-        vec3 colI = vec3(floorLight) * trans * (1.0 - Fi) + env(R, C) * Fi;
+    // 3. Fluid inside dish (ferrofluid & ink)
+    vec2 uvCoord = smoothUV(toUV(p.xz), vec2(384.0));
+    vec4 Hs = texture2D(u_height, uvCoord);
+    float ferroMask = smoothstep(-0.002, 0.002, Hs.a - Hs.b);
 
-        col = mix(colI, colF, ferroMask);
-    }
+    // Ferrofluid: black dielectric mirror (oil carrier, magnetite absorbs all transmitted light)
+    float Ff = 0.045 + 0.955 * fres5;
+    vec3 colF = env(R, C) * Ff + vec3(0.004);
+
+    // Ink: translucent dyed water with refraction and Beer-Lambert absorption
+    float Fi = 0.02 + 0.98 * fres5;
+    vec3 rt = refract(rd, N, 1.0 / 1.33);
+    float depth = max(Hs.b, 0.002);
+    float cosT = max(-rt.y, 0.25);
+    vec2 pb = p.xz + rt.xz / cosT * depth;
+    vec2 uvb = smoothUV(toUV(pb), vec2(256.0));
+    vec3 dye = texture2D(u_dye, uvb).rgb;
+    vec3 logA = dye.r * log(max(u_ink1, vec3(0.003))) + dye.g * log(max(u_ink2, vec3(0.003))) + dye.b * log(max(u_ink3, vec3(0.003)));
+    float path = depth * (1.0 / cosT + 1.0);
+    vec3 trans = exp(logA * u_density * path / (2.0 * 0.32 * u_H));
+    float ferroUnder = texture2D(u_height, smoothUV(uvb, vec2(384.0))).g;
+    float floorLight = 0.95 * (1.0 - 0.85 * ferroUnder);
+    vec3 colI = vec3(floorLight) * trans * (1.0 - Fi) + env(R, C) * Fi;
+
+    vec3 colFluid = mix(colI, colF, ferroMask);
+
+    // Subpixel antialiased transition across dish rim and table
+    float fw = max(fwidth(d), 0.0025);
+    float rimWeight = smoothstep(2.205 - fw, 2.215 + fw, d);
+    float tableWeight = smoothstep(2.285 - fw, 2.295 + fw, d);
+
+    vec3 col = mix(colFluid, colRim, rimWeight);
+    col = mix(col, colTable, tableWeight);
 
     gl_FragColor = vec4(col, t);
 }
@@ -1515,10 +1553,11 @@ void main() {
     vec3 acc = c0.rgb;
     float wsum = 1.0;
     if (coc > 0.6) {
-        for (int i = 0; i < 28; i++) {
+        float rot = hash(gl_FragCoord.xy) * 6.2831853;
+        for (int i = 0; i < 32; i++) {
             float fi = float(i) + 0.5;
-            float rr = sqrt(fi / 28.0) * coc;
-            float a = fi * 2.39996323;
+            float rr = sqrt(fi / 32.0) * coc;
+            float a = fi * 2.39996323 + rot;
             vec2 off = vec2(cos(a), sin(a)) * rr / u_res;
             vec4 s = texture2D(u_color, vUv + off);
             float sc = cocOf(s.a, focus);
@@ -1531,16 +1570,16 @@ void main() {
 
     // Lateral chromatic aberration toward the frame edge
     vec2 dc = vUv - 0.5;
-    float ca = dot(dc, dc) * 0.006;
-    col.r = mix(col.r, texture2D(u_color, vUv + dc * ca * 4.0).r, 0.5);
-    col.b = mix(col.b, texture2D(u_color, vUv - dc * ca * 4.0).b, 0.5);
+    float ca = dot(dc, dc) * 0.0035;
+    col.r = mix(col.r, texture2D(u_color, vUv + dc * ca * 3.0).r, 0.4);
+    col.b = mix(col.b, texture2D(u_color, vUv - dc * ca * 3.0).b, 0.4);
 
     float aspect = u_res.x / u_res.y;
     col *= mix(1.0, 0.55, smoothstep(0.35, 1.05, length(dc * vec2(aspect, 1.0))));
 
     col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
     col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
-    col += (hash(vUv * u_res + fract(u_time) * 100.0) - 0.5) * 0.012;
+    col += (hash(vUv * u_res + fract(u_time) * 100.0) - 0.5) * 0.008;
     gl_FragColor = vec4(col, 1.0);
 }
 `;
