@@ -344,17 +344,11 @@ class FerrofluidScene {
 
         this.mat.blit = this._shader(FerrofluidScene.FS_BLIT, { u_tex: { value: null } });
 
-        this.mat.mu = this._shader(FerrofluidScene.FS_MU, {
-            u_state: { value: null }, u_K: { value: null },
+        this.mat.phase = this._shader(FerrofluidScene.FS_PHASE, {
+            u_state: { value: null }, u_K: { value: null }, u_ctrl: { value: null },
             u_px: { value: V2(1 / N, 1 / N) },
-            u_eps2: { value: 1.2 }, u_brep: { value: 2.0 }, u_pull: { value: 0.25 },
-            u_local: { value: 0.55 }, u_magR: { value: 0.30 }, u_magpos: { value: V2(0.5, 0.5) }
-        });
-
-        this.mat.phase = this._shader(FerrofluidScene.FS_CH_STEP, {
-            u_state: { value: null }, u_mu: { value: null },
-            u_px: { value: V2(1 / N, 1 / N) },
-            u_dt: { value: 0.03 },
+            u_eps2: { value: 1.2 }, u_brep: { value: 2.0 },
+            u_dt: { value: 0.15 },
             u_mouse_pos: { value: V2(-1, -1) }, u_mouse_action: { value: 0 }
         });
 
@@ -661,36 +655,44 @@ class FerrofluidScene {
         this._pass(M.blur, R.K);
 
 
-        // 3. Cahn-Hilliard phase-field substeps (strictly mass-conserving via flux divergence)
-        var eps2 = Math.max(0.55, P.tension);
-        var muU = M.mu.uniforms;
-        muU.u_K.value = R.K.texture;
-        muU.u_eps2.value = eps2;
-        muU.u_brep.value = this.brep;
-        muU.u_pull.value = P.magnetPull * (0.4 + 0.6 * Math.min(1.5, this.fieldEff));
-        muU.u_local.value = P.focus;
-        muU.u_magpos.value.copy(this.magnetEff);
+        // 3. Volume reduction 256 → 16 → 1
+        M.reduce.uniforms.u_src.value = R.low.texture;
+        M.reduce.uniforms.u_srcSize.value = NL;
+        M.reduce.uniforms.u_block.value = 16;
+        this._pass(M.reduce, R.red16);
+        M.reduce.uniforms.u_src.value = R.red16.texture;
+        M.reduce.uniforms.u_srcSize.value = 16;
+        M.reduce.uniforms.u_block.value = 16;
+        this._pass(M.reduce, R.red1);
 
+        // 4. Volume-conserving Lagrange multiplier λ (PI controller on GPU)
+        M.ctrl.uniforms.u_prev.value = R.ctrlA.texture;
+        M.ctrl.uniforms.u_mean.value = R.red1.texture;
+        M.ctrl.uniforms.u_V0.value = this.volumeTarget;
+        M.ctrl.uniforms.u_reset.value = this._ctrlReset ? 1.0 : 0.0;
+        M.ctrl.uniforms.u_init.value = 0.25 + 0.2 * this.brep;
+        this._pass(M.ctrl, R.ctrlB);
+        var t = R.ctrlA; R.ctrlA = R.ctrlB; R.ctrlB = t;
+        this._ctrlReset = false;
+
+        // 5. Phase-field substeps
         var pu = M.phase.uniforms;
-        pu.u_mu.value = R.mu.texture;
+        pu.u_K.value = R.K.texture;
+        pu.u_ctrl.value = R.ctrlA.texture;
+        var eps2 = Math.max(0.55, P.tension);
+        pu.u_eps2.value = eps2;
+        pu.u_brep.value = this.brep;
         pu.u_mouse_pos.value.copy(this.mouseUV);
         pu.u_mouse_action.value = this.mouseAction;
 
-        // Dynamic Cahn-Hilliard CFL timestep ensuring linear stability
-        var chDt = Math.min(0.045, 1.40 / (28.44 * eps2 + 10.66));
-        pu.u_dt.value = chDt;
+        // Dynamic CFL timestep ensuring linear stability across all surface tensions and field strengths
+        var maxEig = 5.333 * eps2 + 2.0 + 0.25 * this.brep;
+        pu.u_dt.value = Math.min(0.20, 1.40 / maxEig);
 
         var S = Math.max(1, Math.min(12, Math.round(P.simSpeed)));
-        var t;
         for (var i = 0; i < S; i++) {
-            // Stage 1: Chemical potential mu = -eps2*lap(c) + (c^3 - c) + B_rep*K - V_mag
-            muU.u_state.value = R.phaseA.texture;
-            this._pass(M.mu, R.mu);
-
-            // Stage 2: Conservative flux divergence div(J) and update c
             pu.u_state.value = R.phaseA.texture;
             this._pass(M.phase, R.phaseB);
-
             t = R.phaseA; R.phaseA = R.phaseB; R.phaseB = t;
         }
 
@@ -1133,15 +1135,17 @@ uniform sampler2D u_tex;
 void main() { gl_FragColor = texture2D(u_tex, vUv); }
 `;
 
-// Stage 1: Chemical potential mu = -eps2 * lap(c) + (c^3 - c) + B_rep * K - pull * P
-FerrofluidScene.FS_MU = `
+// Conserved Allen-Cahn with non-local dipolar repulsion and zero bulk nucleation
+FerrofluidScene.FS_PHASE = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D u_state;
 uniform sampler2D u_K;
+uniform sampler2D u_ctrl;
 uniform vec2 u_px;
-uniform float u_eps2, u_brep, u_pull, u_local, u_magR;
-uniform vec2 u_magpos;
+uniform float u_eps2, u_brep, u_dt;
+uniform vec2 u_mouse_pos;
+uniform float u_mouse_action;
 
 float sampleBS_K(sampler2D tex, vec2 uv, float n) {
     vec2 vc = uv * n - 0.5;
@@ -1164,7 +1168,7 @@ float sampleBS_K(sampler2D tex, vec2 uv, float n) {
 
 void main() {
     float r = length(vUv - 0.5);
-    if (r > 0.46) { gl_FragColor = vec4(0.0); return; }
+    if (r > 0.46) { gl_FragColor = vec4(-1.0, 0.0, 0.0, 1.0); return; }
 
     float c  = texture2D(u_state, vUv).r;
     float n  = texture2D(u_state, vUv + vec2(0.0, u_px.y)).r;
@@ -1180,78 +1184,17 @@ void main() {
     float lap = (4.0 * (n + s + e + w) + (ne + nw + se + sw) - 20.0 * c) / 6.0;
 
     float K = sampleBS_K(u_K, vUv, 256.0);
+    float lam = texture2D(u_ctrl, vec2(0.5)).r;
 
-    vec2 dm = vUv - u_magpos;
-    float P = exp(-dot(dm, dm) / (u_magR * u_magR));
-    float fieldLocal = mix(1.0, P, u_local);
+    // Strict interface-only mobility: 1 - c^2, strictly ZERO in clear oil (|c| >= 1.0)
+    // Guarantees zero nucleation in empty oil (no fluid can ever appear from nothing)
+    float g = clamp(1.0 - c * c, 0.0, 1.0);
 
-    // Chemical potential: mu = -eps2 * lap + (c^3 - c) + brep * fieldLocal * K - pull * P
-    float mu = -u_eps2 * lap + (c * c * c - c) + u_brep * fieldLocal * K - u_pull * P;
-    gl_FragColor = vec4(mu, 0.0, 0.0, 1.0);
-}
-`;
+    // Physical drive: dipolar demagnetization repulsion + volume-conserving Lagrange multiplier
+    float drive = -u_brep * K + lam;
 
-// Stage 2: Conservative Cahn-Hilliard flux divergence: c_new = c + dt * div(M * grad(mu))
-FerrofluidScene.FS_CH_STEP = `
-precision highp float;
-varying vec2 vUv;
-uniform sampler2D u_state;
-uniform sampler2D u_mu;
-uniform vec2 u_px;
-uniform float u_dt, u_mouse_action;
-uniform vec2 u_mouse_pos;
-
-void main() {
-    float r = length(vUv - 0.5);
-    if (r > 0.46) { gl_FragColor = vec4(-1.0, 0.0, 0.0, 1.0); return; }
-
-    float c = texture2D(u_state, vUv).r;
-
-    // Boundary mobility mask: 1 inside dish, 0 outside dish wall (zero-flux boundary condition)
-    float rC  = r;
-    float rN  = length(vUv + vec2(0.0, u_px.y) - 0.5);
-    float rS  = length(vUv - vec2(0.0, u_px.y) - 0.5);
-    float rE  = length(vUv + vec2(u_px.x, 0.0) - 0.5);
-    float rW  = length(vUv - vec2(u_px.x, 0.0) - 0.5);
-    float rNE = length(vUv + u_px - 0.5);
-    float rSW = length(vUv - u_px - 0.5);
-    float rNW = length(vUv + vec2(-u_px.x, u_px.y) - 0.5);
-    float rSE = length(vUv + vec2(u_px.x, -u_px.y) - 0.5);
-
-    float wC  = smoothstep(0.46, 0.452, rC);
-    float wN  = smoothstep(0.46, 0.452, rN);
-    float wS  = smoothstep(0.46, 0.452, rS);
-    float wE  = smoothstep(0.46, 0.452, rE);
-    float wW  = smoothstep(0.46, 0.452, rW);
-    float wNE = smoothstep(0.46, 0.452, rNE);
-    float wSW = smoothstep(0.46, 0.452, rSW);
-    float wNW = smoothstep(0.46, 0.452, rNW);
-    float wSE = smoothstep(0.46, 0.452, rSE);
-
-    float muC  = texture2D(u_mu, vUv).r;
-    float muN  = texture2D(u_mu, vUv + vec2(0.0, u_px.y)).r;
-    float muS  = texture2D(u_mu, vUv - vec2(0.0, u_px.y)).r;
-    float muE  = texture2D(u_mu, vUv + vec2(u_px.x, 0.0)).r;
-    float muW  = texture2D(u_mu, vUv - vec2(u_px.x, 0.0)).r;
-    float muNE = texture2D(u_mu, vUv + u_px).r;
-    float muSW = texture2D(u_mu, vUv - u_px).r;
-    float muNW = texture2D(u_mu, vUv + vec2(-u_px.x, u_px.y)).r;
-    float muSE = texture2D(u_mu, vUv + vec2(u_px.x, -u_px.y)).r;
-
-    // Pairwise conservative fluxes (orthogonal weight 4/6, diagonal weight 1/6)
-    // Guarantees identically zero net flux across domain & zero flux at dish walls
-    float fE  = (4.0 / 6.0) * min(wC, wE)  * (muE  - muC);
-    float fW  = (4.0 / 6.0) * min(wC, wW)  * (muW  - muC);
-    float fN  = (4.0 / 6.0) * min(wC, wN)  * (muN  - muC);
-    float fS  = (4.0 / 6.0) * min(wC, wS)  * (muS  - muC);
-    float fNE = (1.0 / 6.0) * min(wC, wNE) * (muNE - muC);
-    float fSW = (1.0 / 6.0) * min(wC, wSW) * (muSW - muC);
-    float fNW = (1.0 / 6.0) * min(wC, wNW) * (muNW - muC);
-    float fSE = (1.0 / 6.0) * min(wC, wSE) * (muSE - muC);
-
-    float divFlux = fE + fW + fN + fS + fNE + fSW + fNW + fSE;
-
-    float delta = clamp(u_dt * divFlux, -0.30, 0.30);
+    float rhs = u_eps2 * lap + c - c * c * c + g * drive;
+    float delta = clamp(u_dt * rhs, -0.30, 0.30);
     float nc = clamp(c + delta, -1.0, 1.0);
 
     // Interactive fluid injection (Shift + drag adds fresh ferrofluid)
@@ -1261,7 +1204,7 @@ void main() {
     }
 
     nc = mix(nc, -1.0, smoothstep(0.445, 0.46, r));
-    gl_FragColor = vec4(nc, divFlux, 0.0, 1.0);
+    gl_FragColor = vec4(nc, rhs, 0.0, 1.0);
 }
 `;
 
@@ -1368,12 +1311,13 @@ void main() {
     float L = k2 * k2 * c + 2.0 * k2 * lap + bih;
 
     float rho = texture2D(u_rho, vUv).r;
+    if (rho < 0.20) { gl_FragColor = vec4(0.0); return; }
     float fm = smoothstep(0.35, 0.75, rho);
     float rr = u_r * fm - 0.6 * (1.0 - fm);
 
     float nc = c + u_dt * (rr * c - L + 0.9 * c * c - c * c * c);
     nc += (hash(vUv * 512.0 + u_seed) - 0.5) * 0.0015 * fm;
-    gl_FragColor = vec4(clamp(nc, -2.0, 2.0), 0.0, 0.0, 1.0);
+    gl_FragColor = vec4(clamp(nc, -2.0, 2.0) * fm, 0.0, 0.0, 1.0);
 }
 `;
 
@@ -1398,7 +1342,7 @@ void main() {
 
     vec2 dm = vUv - u_magpos;
     float P = exp(-dot(dm, dm) / (u_magR * u_magR));
-    v += u_magvel * P * 0.6;
+    v += u_magvel * P * 0.6 - dm * P * 0.015;
 
     float Lv = length(v);
     if (Lv > 0.01) v *= 0.01 / Lv;
