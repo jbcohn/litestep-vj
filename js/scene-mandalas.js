@@ -5,9 +5,12 @@
  *  - 3D Wireframe Perspective Lattice Tunnel (spokes + rings + diagonal cross-ribs)
  *  - 3D Log-Conformal Spiral Lattice (orthogonal log-spirals forming a curved depth grid)
  *  - 3D Spherical / Hyperbolic Bulge Perspective Lattice (curved dome perspective)
- *  - 3D Polygonal Tunnels with converging depth spokes
- *  - Phyllotaxis with neon bloom glow halos
- *  - Smooth HSL-interpolated continuous color gradients
+ *  - 3D Polygonal Tunnels with converging depth spokes & warp-tunnel Z-flight
+ *  - Dynamic Kaleidoscope Engine with multi-fold mirror symmetry wedges
+ *  - Laser Bloom & Additive Radiance glow with neon line haloing
+ *  - Kick & Bass Kinetic Shockwaves with rotational snap
+ *  - Interactive mouse/touch drag (spin, pan, zoom, reset)
+ *  - Live parameter tuner and full HUD line thickness reactivity
  */
 
 class MandalaScene {
@@ -20,6 +23,28 @@ class MandalaScene {
         this.colorShift = 0.0;
         this.baseRotation = 0;
         this.breathePhase = 0.0; // 4-beat gentle breathing phase
+
+        // Spice-Up Parameters
+        this.lineThickness = 1.0;   // Master thickness multiplier (linked to HUD slider)
+        this.laserBloom = 1.2;      // Neon halo & additive bloom intensity (0.0 - 2.5)
+        this.symmetry = 0;          // Kaleidoscope symmetry (0=Off, 4, 6, 8, 12, 16, 24)
+        this.tunnelSpeed = 1.0;     // Warp tunnel Z-flight speed (-3.0 to 3.0)
+        this.tunnelDepth = 0.0;     // Continuous tunnel progression
+        this.spinSpeed = 1.0;       // Rotation spin speed (0.0 to 4.0)
+        this.audioScale = 1.0;      // Bass kick & reactivity scale (0.0 to 2.5)
+
+        // Kinetic Audio Shockwaves
+        this.kickScale = 0.0;
+        this.kickTwist = 0.0;
+
+        // Interactive View Controls
+        this.panX = 0;
+        this.panY = 0;
+        this.zoom = 1.0;
+
+        // Offscreen Canvas for Kaleidoscope Engine
+        this._offscreenCanvas = null;
+        this._offscreenCtx = null;
 
         this.paletteNames = [
             "Cosmic Aurora", "Neon Cyberpunk", "Rainbow Prism",
@@ -74,7 +99,151 @@ class MandalaScene {
         }));
     }
 
-    init(canvas, ctx) { this.canvas = canvas; this.ctx = ctx; }
+    init(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this._setupInteraction();
+    }
+
+    _setupInteraction() {
+        if (!this.canvas) return;
+        var self = this;
+        var isDown = false;
+        var startX = 0, startY = 0;
+
+        this.canvas.addEventListener("mousedown", function(e) {
+            isDown = true;
+            startX = e.clientX;
+            startY = e.clientY;
+        });
+
+        window.addEventListener("mousemove", function(e) {
+            if (!isDown) return;
+            var dx = e.clientX - startX;
+            var dy = e.clientY - startY;
+            startX = e.clientX;
+            startY = e.clientY;
+
+            if (e.shiftKey || e.altKey || e.metaKey) {
+                // Pan camera view
+                self.panX += dx;
+                self.panY += dy;
+            } else {
+                // Interactive spin
+                self.baseRotation += dx * 0.007;
+            }
+        });
+
+        window.addEventListener("mouseup", function() {
+            isDown = false;
+        });
+
+        this.canvas.addEventListener("wheel", function(e) {
+            e.preventDefault();
+            var factor = e.deltaY < 0 ? 1.08 : 0.92;
+            self.zoom = Math.max(0.3, Math.min(4.5, self.zoom * factor));
+        }, { passive: false });
+
+        this.canvas.addEventListener("dblclick", function() {
+            self.resetView();
+        });
+
+        // Touch support for tablets and mobile devices
+        var lastTouchX = 0, lastTouchY = 0, lastTouchDist = 0;
+        this.canvas.addEventListener("touchstart", function(e) {
+            if (e.touches.length === 1) {
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
+            } else if (e.touches.length === 2) {
+                var dx = e.touches[0].clientX - e.touches[1].clientX;
+                var dy = e.touches[0].clientY - e.touches[1].clientY;
+                lastTouchDist = Math.sqrt(dx * dx + dy * dy);
+            }
+        }, { passive: true });
+
+        this.canvas.addEventListener("touchmove", function(e) {
+            if (e.touches.length === 1) {
+                var dx = e.touches[0].clientX - lastTouchX;
+                var dy = e.touches[0].clientY - lastTouchY;
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
+                self.baseRotation += dx * 0.008;
+            } else if (e.touches.length === 2) {
+                var dx = e.touches[0].clientX - e.touches[1].clientX;
+                var dy = e.touches[0].clientY - e.touches[1].clientY;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (lastTouchDist > 0) {
+                    var factor = dist / lastTouchDist;
+                    self.zoom = Math.max(0.3, Math.min(4.5, self.zoom * factor));
+                }
+                lastTouchDist = dist;
+            }
+        }, { passive: true });
+    }
+
+    setThickness(val) {
+        // Linked to HUD slider (4.0px = 1.0 baseline)
+        this.lineThickness = Math.max(0.2, Math.min(8.0, val / 4.0));
+    }
+
+    setLaserBloom(val) {
+        this.laserBloom = Math.max(0.0, Math.min(3.0, parseFloat(val) || 0.0));
+    }
+
+    setSymmetry(val) {
+        this.symmetry = parseInt(val, 10) || 0;
+    }
+
+    setTunnelSpeed(val) {
+        this.tunnelSpeed = parseFloat(val) || 0.0;
+    }
+
+    setSpinSpeed(val) {
+        this.spinSpeed = Math.max(0.0, Math.min(4.0, parseFloat(val) || 0.0));
+    }
+
+    setAudioScale(val) {
+        this.audioScale = Math.max(0.0, Math.min(3.0, parseFloat(val) || 1.0));
+    }
+
+    setZoom(val) {
+        this.zoom = Math.max(0.3, Math.min(4.5, parseFloat(val) || 1.0));
+    }
+
+    resetView() {
+        this.panX = 0;
+        this.panY = 0;
+        this.zoom = 1.0;
+    }
+
+    setPreset(idx) {
+        this.currentPreset = Math.abs(idx) % this.layerPresets.length;
+        this.layers = this._clonePreset(this.currentPreset);
+    }
+
+    cyclePreset() {
+        this.setPreset(this.currentPreset + 1);
+    }
+
+    setPalette(idx) {
+        this.paletteIdx = Math.abs(idx) % this.paletteNames.length;
+    }
+
+    cyclePalette() {
+        this.setPalette(this.paletteIdx + 1);
+    }
+
+    setParam(key, val) {
+        if (key === "thickness") this.setThickness(val);
+        else if (key === "bloom") this.setLaserBloom(val);
+        else if (key === "symmetry") this.setSymmetry(val);
+        else if (key === "speed") this.setTunnelSpeed(val);
+        else if (key === "spin") this.setSpinSpeed(val);
+        else if (key === "audio") this.setAudioScale(val);
+        else if (key === "zoom") this.setZoom(val);
+        else if (key === "preset") this.setPreset(val);
+        else if (key === "palette") this.setPalette(val);
+    }
 
     getColor(t, palIdx, offset) {
         offset = offset || 0;
@@ -100,7 +269,6 @@ class MandalaScene {
         this.layers.forEach(function(l) {
             l.colorOffset = Math.random();
             if (l.type === "Lattices") {
-                // Focus strictly on 3D perspective lattices (types 3, 4, 5, 6)
                 l.params.rotation = Math.floor(Math.random() * 60);
                 l.params.depth_stroke = 1;
                 l.params.double_grid = 1;
@@ -142,8 +310,22 @@ class MandalaScene {
         var breatheFreq = (bpm / 60.0) / 4.0;
         this.breathePhase = (this.breathePhase + dt * breatheFreq * Math.PI * 2) % (Math.PI * 2);
 
-        this.baseRotation += (0.08 + audio.mids * 0.18) * dt;
-        this.colorShift = (this.colorShift + dt * 0.04 + audio.mids * dt * 0.06) % 1.0;
+        // Rotation spin speed driven by user param & mids
+        this.baseRotation += (0.08 + (audio.mids || 0) * 0.18) * dt * this.spinSpeed;
+        this.colorShift = (this.colorShift + dt * 0.04 + (audio.mids || 0) * dt * 0.06) % 1.0;
+
+        // Continuous Warp-Tunnel Z-flight depth progression
+        var flightSpeed = (0.28 + (audio.energy || 0.3) * 0.45) * this.tunnelSpeed;
+        this.tunnelDepth = (this.tunnelDepth + dt * flightSpeed) % 1.0;
+        if (this.tunnelDepth < 0) this.tunnelDepth += 1.0;
+
+        // Kick & Bass Kinetic Shockwaves with rotational snap
+        if (audio && audio.isBeat) {
+            this.kickScale = Math.min(1.2, this.kickScale + 0.40 * this.audioScale);
+            this.kickTwist += (Math.random() > 0.5 ? 1 : -1) * (0.05 + (audio.bass || 0) * 0.09) * this.audioScale;
+        }
+        this.kickScale *= Math.exp(-6.5 * dt);
+        this.kickTwist *= Math.exp(-6.0 * dt);
     }
 
     draw(ctx, width, height, alpha, audio) {
@@ -155,14 +337,14 @@ class MandalaScene {
         var cx = width / 2, cy = height / 2;
         var R = Math.min(width, height) / 2;
 
-        // Gentle breathing in and out over 4 musical beats (sinusoidal expansion & contraction)
-        var breathe = Math.sin(this.breathePhase); // -1.0 (exhale) to +1.0 (inhale)
-        var breathe01 = 0.5 + breathe * 0.5;      // 0.0 to 1.0 smooth breathing envelope
+        // Gentle breathing in and out over 4 musical beats
+        var breathe = Math.sin(this.breathePhase);
+        var breathe01 = 0.5 + breathe * 0.5;
 
         // Audio-reactive radial background gradient
         var bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) * 0.75);
         var hueCenter = ((this.colorShift + 0.5) % 1.0) * 360;
-        var glowStr = 0.14 + breathe01 * 0.10 + audio.sub * 0.08;
+        var glowStr = 0.14 + breathe01 * 0.10 + (audio.sub || 0) * 0.08 + this.kickScale * 0.08;
         bgGrad.addColorStop(0,   'hsla(' + hueCenter + ',80%,12%,' + glowStr + ')');
         bgGrad.addColorStop(0.5, 'hsla(' + ((hueCenter + 40) % 360) + ',60%,6%,0.95)');
         bgGrad.addColorStop(1,   '#020410');
@@ -171,36 +353,115 @@ class MandalaScene {
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, width, height);
 
-        // Master radius expands smoothly in and out over 4 beats
+        // Master radius expands smoothly in and out over 4 beats, scaled by zoom and kick shockwaves
         var breathePulse = 1.0 + breathe * 0.048;
-        var masterRadius = R * 0.93 * breathePulse;
+        var masterRadius = R * 0.93 * breathePulse * this.zoom * (1.0 + this.kickScale * 0.16);
         var baseScale = masterRadius;
-        var self = this;
         var pal = this.paletteIdx;
 
-        ctx.translate(cx, cy);
-        ctx.rotate(this.baseRotation);
+        // Dynamic Kaleidoscope Engine
+        if (this.symmetry > 1) {
+            if (!this._offscreenCanvas) {
+                this._offscreenCanvas = document.createElement("canvas");
+                this._offscreenCtx = this._offscreenCanvas.getContext("2d");
+            }
+            if (this._offscreenCanvas.width !== width || this._offscreenCanvas.height !== height) {
+                this._offscreenCanvas.width = width;
+                this._offscreenCanvas.height = height;
+            }
+            var offCtx = this._offscreenCtx;
+            offCtx.clearRect(0, 0, width, height);
+            offCtx.save();
+            offCtx.translate(cx + this.panX, cy + this.panY);
+            offCtx.rotate(this.baseRotation + this.kickTwist);
+            this.drawLayers(offCtx, baseScale, pal, audio, breathe, masterRadius);
+            offCtx.restore();
 
-        this.layers.forEach(function(layer) {
-            if (!layer.active) return;
+            // Blit kaleidoscope wedges around center
+            var N = this.symmetry;
+            var wedgeAngle = (Math.PI * 2) / N;
+            var halfWedge = wedgeAngle / 2;
+            var wedgeR = Math.max(width, height) * 1.5;
+
             ctx.save();
-            var p = layer.params, colOff = layer.colorOffset;
-            if      (layer.type === "Lattices") self.drawLattices(ctx, baseScale, p, pal, colOff, audio, breathe);
-            else if (layer.type === "Phyllo")   self.drawPhyllotaxis(ctx, baseScale, p, pal, colOff, audio, breathe);
-            else if (layer.type === "Spirals")  self.drawSpirals(ctx, baseScale, p, pal, colOff, audio, breathe);
-            else if (layer.type === "Cobwebs")  self.drawCobwebs(ctx, baseScale, p, pal, colOff, audio, breathe);
-            else if (layer.type === "Tunnels")  self.drawTunnels(ctx, baseScale, p, pal, colOff, audio, breathe);
+            ctx.translate(cx + this.panX, cy + this.panY);
+            for (var k = 0; k < N; k++) {
+                ctx.save();
+                ctx.rotate(k * wedgeAngle);
+                if (k % 2 === 1) {
+                    ctx.scale(1, -1);
+                }
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                // Subpixel seam overlap (+0.012 rad) eliminates hairline rendering gaps
+                ctx.arc(0, 0, wedgeR, -halfWedge - 0.012, halfWedge + 0.012);
+                ctx.closePath();
+                ctx.clip();
+                ctx.drawImage(this._offscreenCanvas, -(cx + this.panX), -(cy + this.panY));
+                ctx.restore();
+            }
             ctx.restore();
-        });
+        } else {
+            // Direct rendering without offscreen overhead
+            ctx.save();
+            ctx.translate(cx + this.panX, cy + this.panY);
+            ctx.rotate(this.baseRotation + this.kickTwist);
+            this.drawLayers(ctx, baseScale, pal, audio, breathe, masterRadius);
+            ctx.restore();
+        }
 
-        // Outer glow ring with gentle breathing pulse
+        // Outer glow ring with gentle breathing pulse & kick shockwave
+        ctx.save();
+        ctx.translate(cx + this.panX, cy + this.panY);
         ctx.beginPath();
         ctx.arc(0, 0, masterRadius * 0.975, 0, Math.PI * 2);
         ctx.strokeStyle = this.getColor(0.5, pal, 0.2);
-        ctx.lineWidth = 1.6 + breathe01 * 1.6 + audio.sub * 1.0;
-        ctx.globalAlpha = alpha * (0.22 + breathe01 * 0.24 + audio.sub * 0.15);
+        ctx.lineWidth = (1.6 + breathe01 * 1.6 + (audio.sub || 0) * 1.0 + this.kickScale * 1.5) * this.lineThickness;
+        ctx.globalAlpha = alpha * (0.22 + breathe01 * 0.24 + (audio.sub || 0) * 0.15 + this.kickScale * 0.2);
         ctx.stroke();
         ctx.restore();
+
+        ctx.restore();
+    }
+
+    drawLayers(targetCtx, baseScale, pal, audio, breathe, masterRadius) {
+        var self = this;
+
+        // Configure Laser Bloom Neon Halo
+        if (this.laserBloom > 0.1) {
+            targetCtx.shadowBlur = Math.min(22, 6.5 * this.laserBloom * Math.sqrt(this.lineThickness));
+        } else {
+            targetCtx.shadowBlur = 0;
+        }
+
+        this.layers.forEach(function(layer) {
+            if (!layer.active) return;
+            targetCtx.save();
+            var p = layer.params, colOff = layer.colorOffset;
+            if      (layer.type === "Lattices") self.drawLattices(targetCtx, baseScale, p, pal, colOff, audio, breathe);
+            else if (layer.type === "Phyllo")   self.drawPhyllotaxis(targetCtx, baseScale, p, pal, colOff, audio, breathe);
+            else if (layer.type === "Spirals")  self.drawSpirals(targetCtx, baseScale, p, pal, colOff, audio, breathe);
+            else if (layer.type === "Cobwebs")  self.drawCobwebs(targetCtx, baseScale, p, pal, colOff, audio, breathe);
+            else if (layer.type === "Tunnels")  self.drawTunnels(targetCtx, baseScale, p, pal, colOff, audio, breathe);
+            targetCtx.restore();
+        });
+
+        // Additive Center Laser Bloom Radiance Pass
+        if (this.laserBloom > 0.4) {
+            targetCtx.save();
+            targetCtx.globalCompositeOperation = "lighter";
+            var bloomGrad = targetCtx.createRadialGradient(0, 0, 0, 0, 0, masterRadius * 0.88);
+            var bloomAlpha = Math.min(0.38, (this.laserBloom - 0.4) * 0.18 + (audio.energy || 0) * 0.10);
+            var coreHue = ((this.colorShift * 360) % 360).toFixed(1);
+            bloomGrad.addColorStop(0,   'hsla(' + coreHue + ',100%,70%,' + bloomAlpha + ')');
+            bloomGrad.addColorStop(0.5, 'hsla(' + ((Number(coreHue) + 50) % 360) + ',90%,55%,' + (bloomAlpha * 0.42) + ')');
+            bloomGrad.addColorStop(1,   'rgba(0,0,0,0)');
+            targetCtx.fillStyle = bloomGrad;
+            targetCtx.beginPath();
+            targetCtx.arc(0, 0, masterRadius * 0.88, 0, Math.PI * 2);
+            targetCtx.fill();
+            targetCtx.restore();
+        }
     }
 
     /* =========================================================================
@@ -216,12 +477,12 @@ class MandalaScene {
         breathe = breathe !== undefined ? breathe : 0;
         var breathe01  = 0.5 + breathe * 0.5;
         var gridType   = p.grid_type !== undefined ? p.grid_type : 3;
-        var cellScale  = (p.cell_scale || 0.06) * (1.0 + breathe01 * 0.04 + audio.highs * 0.04);
+        var cellScale  = (p.cell_scale || 0.06) * (1.0 + breathe01 * 0.04 + (audio.highs || 0) * 0.04);
         var doubleGrid = p.double_grid !== undefined ? p.double_grid : 1;
         var depthStroke= p.depth_stroke !== undefined ? p.depth_stroke : 1;
         var fillScale  = p.fill_scale !== undefined ? p.fill_scale : 0.78;
         var maxR       = (p.radius || 0.90) * baseScale;
-        var baseThick  = (p.thickness || 1.6) + breathe01 * 0.35 + audio.bass * 0.25;
+        var baseThick  = ((p.thickness || 1.6) + breathe01 * 0.35 + (audio.bass || 0) * 0.25) * this.lineThickness;
         var rotation   = (p.rotation || 0) * Math.PI / 180;
         var self = this;
 
@@ -243,7 +504,9 @@ class MandalaScene {
             var nRings = Math.ceil(uMax / d_u) + 6;
 
             for (var r = 0; r <= nRings; r++) {
-                var uc = uMax - r * d_u;
+                // Continuous warp-tunnel Z-flight offset
+                var effR = r + this.tunnelDepth;
+                var uc = uMax - effR * d_u;
                 var rCenter = Math.exp(uc);
                 if (rCenter < 0.6) break;
 
@@ -252,6 +515,7 @@ class MandalaScene {
                 var color = this.getColor(1.0 - rNorm, palIdx, colOff);
 
                 ctx.strokeStyle = color;
+                if (this.laserBloom > 0.1) ctx.shadowColor = color;
                 ctx.lineWidth = thick;
 
                 for (var s = 0; s < nSectors; s++) {
@@ -298,7 +562,8 @@ class MandalaScene {
             var ringPoints = []; // [ring][side] = {x, y, tDepth}
 
             for (var k = 0; k <= rings; k++) {
-                var tDepth = perspective / (k + perspective);
+                var effK = k + this.tunnelDepth;
+                var tDepth = perspective / (effK + perspective);
                 var ringR = tDepth * maxR;
                 var ringRot = (rings - k) * twistRate + this.time * 0.18;
                 var pts = [];
@@ -318,13 +583,15 @@ class MandalaScene {
             for (var k = 0; k <= rings; k++) {
                 var pts = ringPoints[k];
                 var tD = pts[0].tDepth;
+                var rCol = this.getColor(tD, palIdx, colOff);
                 ctx.beginPath();
                 for (var s = 0; s <= sides; s++) {
                     var pt = pts[s % sides];
                     if (s === 0) ctx.moveTo(pt.x, pt.y);
                     else ctx.lineTo(pt.x, pt.y);
                 }
-                ctx.strokeStyle = this.getColor(tD, palIdx, colOff);
+                ctx.strokeStyle = rCol;
+                if (this.laserBloom > 0.1) ctx.shadowColor = rCol;
                 ctx.lineWidth = depthStroke === 1 ? baseThick * Math.max(0.2, tD) : baseThick;
                 ctx.stroke();
             }
@@ -336,7 +603,9 @@ class MandalaScene {
                     var pt = ringPoints[k][s];
                     if (k === 0) ctx.moveTo(pt.x, pt.y);
                     else {
-                        ctx.strokeStyle = this.getColor(pt.tDepth, palIdx, colOff + 0.15);
+                        var spkCol = this.getColor(pt.tDepth, palIdx, colOff + 0.15);
+                        ctx.strokeStyle = spkCol;
+                        if (this.laserBloom > 0.1) ctx.shadowColor = spkCol;
                         ctx.lineWidth = depthStroke === 1 ? baseThick * 0.7 * Math.max(0.2, pt.tDepth) : baseThick * 0.7;
                         ctx.lineTo(pt.x, pt.y);
                         ctx.stroke();
@@ -346,10 +615,12 @@ class MandalaScene {
                 }
             }
 
-            // 3. DIAGONAL LATTICE RIBS (Weaves spokes & rings into a 3D perspective wireframe cage!)
+            // 3. DIAGONAL LATTICE RIBS
             for (var k = 0; k < rings; k++) {
                 var tD = ringPoints[k][0].tDepth;
-                ctx.strokeStyle = this.getColor(tD, palIdx, colOff + 0.35);
+                var ribCol = this.getColor(tD, palIdx, colOff + 0.35);
+                ctx.strokeStyle = ribCol;
+                if (this.laserBloom > 0.1) ctx.shadowColor = ribCol;
                 ctx.lineWidth = depthStroke === 1 ? baseThick * 0.5 * Math.max(0.15, tD) : baseThick * 0.5;
 
                 for (var s = 0; s < sides; s++) {
@@ -375,10 +646,9 @@ class MandalaScene {
         else if (gridType === 5) {
             var arms = p.arms || 16;
             var tightness = p.tightness || 0.95;
-            var turns = (p.turns || 4.0) + audio.highs * 0.4;
+            var turns = (p.turns || 4.0) + (audio.highs || 0) * 0.4;
             var steps = 140;
 
-            // Two families of counter-rotating logarithmic spirals
             for (var dir = -1; dir <= 1; dir += 2) {
                 for (var i = 0; i < arms; i++) {
                     var baseAngle = (i * 2 * Math.PI) / arms;
@@ -387,14 +657,16 @@ class MandalaScene {
                     for (var s = 0; s <= steps; s++) {
                         var frac = s / steps;
                         var r = Math.pow(frac, tightness) * maxR;
-                        var theta = baseAngle + dir * (frac * turns * 2 * Math.PI + this.time * 0.15);
+                        var theta = baseAngle + dir * (frac * turns * 2 * Math.PI + this.time * 0.15 + this.tunnelDepth * 2.0);
                         var px = r * Math.cos(theta);
                         var py = r * Math.sin(theta);
                         if (s === 0) ctx.moveTo(px, py);
                         else ctx.lineTo(px, py);
                     }
 
-                    ctx.strokeStyle = this.getColor(i / arms, palIdx, colOff + (dir === 1 ? 0 : 0.4));
+                    var spCol = this.getColor(i / arms, palIdx, colOff + (dir === 1 ? 0 : 0.4));
+                    ctx.strokeStyle = spCol;
+                    if (this.laserBloom > 0.1) ctx.shadowColor = spCol;
                     ctx.lineWidth = depthStroke === 1 ? baseThick * (0.6 + 0.6 * (1.0 - (i / arms))) : baseThick;
                     ctx.stroke();
                 }
@@ -410,7 +682,6 @@ class MandalaScene {
             function projectSphere(x, y) {
                 var d = Math.sqrt(x * x + y * y);
                 if (d < 1e-5) return { x: x, y: y, tDist: 0 };
-                // Spherical hemisphere fisheye projection
                 var normD = Math.min(0.99, d / maxR);
                 var curveFactor = Math.sin(normD * (Math.PI / 2)) / normD;
                 return {
@@ -431,8 +702,10 @@ class MandalaScene {
                     var halfSpan = Math.sqrt(maxR * maxR - offset * offset);
                     var segs = 36;
                     var tDist = Math.abs(offset) / maxR;
+                    var domCol = this.getColor(tDist, palIdx, colOff + dir * 0.25);
 
-                    ctx.strokeStyle = this.getColor(tDist, palIdx, colOff + dir * 0.25);
+                    ctx.strokeStyle = domCol;
+                    if (this.laserBloom > 0.1) ctx.shadowColor = domCol;
                     ctx.lineWidth = depthStroke === 1 ? baseThick * Math.max(0.2, 1.0 - tDist * 0.65) : baseThick;
                     ctx.beginPath();
 
@@ -469,11 +742,13 @@ class MandalaScene {
                         var p2x = offset * cosA - L * sinA,    p2y = offset * sinA + L * cosA;
                         var tDist = Math.abs(offset) / (baseScale * 0.9);
                         var thick = depthStroke === 1 ? baseThick * Math.max(0.15, 1.0 - tDist * 0.7) : baseThick;
+                        var col = self.getColor(tDist, palIdx, colOff);
 
                         ctx.beginPath();
                         ctx.moveTo(p1x, p1y);
                         ctx.lineTo(p2x, p2y);
-                        ctx.strokeStyle = self.getColor(tDist, palIdx, colOff);
+                        ctx.strokeStyle = col;
+                        if (self.laserBloom > 0.1) ctx.shadowColor = col;
                         ctx.lineWidth = thick;
                         ctx.stroke();
                     });
@@ -494,7 +769,9 @@ class MandalaScene {
                         if (dist >= maxR) continue;
 
                         var tDist = dist / (baseScale * 0.9);
-                        ctx.strokeStyle = this.getColor(tDist, palIdx, colOff);
+                        var hCol = this.getColor(tDist, palIdx, colOff);
+                        ctx.strokeStyle = hCol;
+                        if (this.laserBloom > 0.1) ctx.shadowColor = hCol;
                         ctx.lineWidth = depthStroke === 1 ? baseThick * Math.max(0.18, 1.0 - tDist * 0.65) : baseThick;
                         ctx.beginPath();
                         for (var ss = 0; ss < 6; ss++) {
@@ -519,31 +796,35 @@ class MandalaScene {
         breathe = breathe !== undefined ? breathe : 0;
         var breathe01  = 0.5 + breathe * 0.5;
         var count = p.count, divAngle = (p.div_angle * Math.PI) / 180.0;
-        var baseR = p.radius * baseScale, baseSize = p.size * baseScale;
+        var baseR = p.radius * baseScale, baseSize = p.size * baseScale * Math.sqrt(this.lineThickness);
         var decay = p.decay, shapeType = p.shape_type !== undefined ? p.shape_type : 3;
 
         for (var n = 1; n <= count; n++) {
             var rNorm = Math.sqrt(n / count), r = rNorm * baseR;
-            var theta = n * divAngle + this.time * 0.11 + audio.highs * 0.04;
+            var theta = n * divAngle + this.time * 0.11 + (audio.highs || 0) * 0.04;
             var sx = r * Math.cos(theta), sy = r * Math.sin(theta);
-            var size = baseSize * Math.pow(rNorm, decay) * (1.0 + breathe01 * 0.14 + audio.bass * 0.10);
+            var size = baseSize * Math.pow(rNorm, decay) * (1.0 + breathe01 * 0.14 + (audio.bass || 0) * 0.10);
             if (size < 0.4) continue;
             var color = this.getColor(rNorm, palIdx, colOff);
 
             // Neon bloom halo
-            if (size > 2.5) {
-                var glowGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, size * 2.2);
+            if (size > 2.5 && this.laserBloom > 0.1) {
+                var glowGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, size * 2.2 * this.laserBloom);
                 var hslMatch = color.match(/hsl\(([^)]+)\)/);
-                var glowCol = hslMatch ? 'hsla(' + hslMatch[1] + ',0.32)' : 'rgba(255,255,255,0.15)';
+                var glowAlpha = Math.min(0.65, 0.32 * this.laserBloom);
+                var glowCol = hslMatch ? 'hsla(' + hslMatch[1] + ',' + glowAlpha + ')' : 'rgba(255,255,255,0.15)';
                 glowGrad.addColorStop(0, glowCol);
                 glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
                 ctx.fillStyle = glowGrad;
                 ctx.beginPath();
-                ctx.arc(sx, sy, size * 2.2, 0, Math.PI * 2);
+                ctx.arc(sx, sy, size * 2.2 * this.laserBloom, 0, Math.PI * 2);
                 ctx.fill();
             }
 
-            ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 1.0;
+            ctx.fillStyle = color;
+            ctx.strokeStyle = color;
+            if (this.laserBloom > 0.1) ctx.shadowColor = color;
+            ctx.lineWidth = Math.max(0.5, 1.0 * this.lineThickness);
 
             if (shapeType === 0) {
                 ctx.beginPath(); ctx.arc(sx, sy, Math.max(0.5, size), 0, Math.PI * 2); ctx.fill();
@@ -597,8 +878,8 @@ class MandalaScene {
         breathe = breathe !== undefined ? breathe : 0;
         var breathe01  = 0.5 + breathe * 0.5;
         var arms = p.arms, tightness = p.tightness;
-        var turns = p.turns + breathe01 * 0.18 + audio.highs * 0.15;
-        var waveAmp = (p.wave_amp + breathe01 * 0.015 + audio.bass * 0.010) * baseScale;
+        var turns = p.turns + breathe01 * 0.18 + (audio.highs || 0) * 0.15;
+        var waveAmp = (p.wave_amp + breathe01 * 0.015 + (audio.bass || 0) * 0.010) * baseScale;
         var waveFreq = p.wave_freq, maxR = p.radius * baseScale, steps = 180;
         var self = this;
 
@@ -614,8 +895,10 @@ class MandalaScene {
                 if (s === 0) ctx.moveTo(r2 * Math.cos(theta2), r2 * Math.sin(theta2));
                 else ctx.lineTo(r2 * Math.cos(theta2), r2 * Math.sin(theta2));
             }
-            ctx.strokeStyle = this.getColor(i / arms, palIdx, colOff);
-            ctx.lineWidth = 1.5 + breathe01 * 0.6 + audio.bass * 0.35;
+            var sCol = this.getColor(i / arms, palIdx, colOff);
+            ctx.strokeStyle = sCol;
+            if (this.laserBloom > 0.1) ctx.shadowColor = sCol;
+            ctx.lineWidth = (1.5 + breathe01 * 0.6 + (audio.bass || 0) * 0.35) * this.lineThickness;
             ctx.stroke();
         }
     }
@@ -628,19 +911,24 @@ class MandalaScene {
         var breathe01  = 0.5 + breathe * 0.5;
         var spokes = p.count, rings = p.rings;
         var sag = p.sag + Math.sin(this.time * 1.5) * 0.04;
-        var maxR = p.radius * baseScale, thick = (p.thickness || 1.4) + breathe01 * 0.35 + audio.bass * 0.25;
+        var maxR = p.radius * baseScale;
+        var thick = ((p.thickness || 1.4) + breathe01 * 0.35 + (audio.bass || 0) * 0.25) * this.lineThickness;
 
         for (var i = 0; i < spokes; i++) {
             var theta = (i * 2 * Math.PI) / spokes;
             ctx.beginPath();
-            ctx.strokeStyle = this.getColor(i / spokes, palIdx, colOff);
+            var spCol = this.getColor(i / spokes, palIdx, colOff);
+            ctx.strokeStyle = spCol;
+            if (this.laserBloom > 0.1) ctx.shadowColor = spCol;
             ctx.lineWidth = thick;
             ctx.moveTo(0, 0); ctx.lineTo(maxR * Math.cos(theta), maxR * Math.sin(theta)); ctx.stroke();
         }
         for (var r = 1; r <= rings; r++) {
             var frac = Math.pow(r / rings, p.spacing), ringR = frac * maxR;
             ctx.beginPath();
-            ctx.strokeStyle = this.getColor(frac, palIdx, colOff + 0.3);
+            var cwCol = this.getColor(frac, palIdx, colOff + 0.3);
+            ctx.strokeStyle = cwCol;
+            if (this.laserBloom > 0.1) ctx.shadowColor = cwCol;
             ctx.lineWidth = thick;
             for (var i2 = 0; i2 <= spokes; i2++) {
                 var t1 = (i2 * 2 * Math.PI) / spokes, t2 = ((i2 + 1) * 2 * Math.PI) / spokes, midT = (t1 + t2) / 2;
@@ -656,25 +944,28 @@ class MandalaScene {
     }
 
     /* =========================================================================
-       TUNNELS (Infinite depth perspective with converging depth spokes)
+       TUNNELS (Infinite depth perspective with converging depth spokes & Z-flight)
        ========================================================================= */
     drawTunnels(ctx, baseScale, p, palIdx, colOff, audio, breathe) {
         breathe = breathe !== undefined ? breathe : 0;
         var breathe01  = 0.5 + breathe * 0.5;
         var rings = p.rings, sides = p.sides;
-        var twistRate = (p.twist + breathe01 * 0.3 + audio.mids * 0.3) * 0.08;
+        var twistRate = (p.twist + breathe01 * 0.3 + (audio.mids || 0) * 0.3) * 0.08;
         var wobble = p.wobble * baseScale, maxR = p.radius * baseScale;
         var perspective = p.perspective;
         var depthStroke = p.depth_stroke !== undefined ? p.depth_stroke : 1;
-        var baseThick = 1.4 + breathe01 * 0.35 + audio.bass * 0.25;
+        var baseThick = (1.4 + breathe01 * 0.35 + (audio.bass || 0) * 0.25) * this.lineThickness;
 
         if (sides === 0) {
             for (var i = rings; i >= 1; i--) {
-                var tDepth = perspective / (i + perspective), ringR = tDepth * maxR;
+                var effRing = i - this.tunnelDepth;
+                var tDepth = perspective / (effRing + perspective), ringR = tDepth * maxR;
                 var thick = depthStroke === 1 ? baseThick * Math.max(0.15, tDepth) : baseThick;
                 var wobX = wobble * Math.sin(i * 0.5) * tDepth, wobY = wobble * Math.cos(i * 0.5) * tDepth;
                 ctx.beginPath(); ctx.arc(wobX, wobY, ringR, 0, Math.PI * 2);
-                ctx.strokeStyle = this.getColor(tDepth, palIdx, colOff);
+                var col = this.getColor(tDepth, palIdx, colOff);
+                ctx.strokeStyle = col;
+                if (this.laserBloom > 0.1) ctx.shadowColor = col;
                 ctx.lineWidth = thick; ctx.stroke();
             }
         } else {
@@ -682,7 +973,8 @@ class MandalaScene {
             for (var s = 0; s < sides; s++) {
                 ctx.beginPath();
                 for (var k = 0; k <= rings; k++) {
-                    var tD = perspective / (k + perspective), rC = tD * maxR;
+                    var effK = k - this.tunnelDepth;
+                    var tD = perspective / (effK + perspective), rC = tD * maxR;
                     var wobX2 = wobble * Math.sin(k * 0.5) * tD, wobY2 = wobble * Math.cos(k * 0.5) * tD;
                     var ringRot = (rings - k) * twistRate + this.time * 0.2;
                     var ang = ringRot + s * (2 * Math.PI / sides);
@@ -690,7 +982,9 @@ class MandalaScene {
                     var thick2 = depthStroke === 1 ? (baseThick * 0.6) * Math.max(0.15, tD) : baseThick * 0.6;
                     if (k === 0) { ctx.moveTo(px, py); }
                     else {
-                        ctx.strokeStyle = this.getColor(tD, palIdx, colOff);
+                        var c = this.getColor(tD, palIdx, colOff);
+                        ctx.strokeStyle = c;
+                        if (this.laserBloom > 0.1) ctx.shadowColor = c;
                         ctx.lineWidth = thick2; ctx.lineTo(px, py); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(px, py);
                     }
@@ -698,7 +992,8 @@ class MandalaScene {
             }
             // Draw transverse polygon ring slices
             for (var i2 = rings; i2 >= 1; i2--) {
-                var tD2 = perspective / (i2 + perspective), ringR2 = tD2 * maxR;
+                var effI = i2 - this.tunnelDepth;
+                var tD2 = perspective / (effI + perspective), ringR2 = tD2 * maxR;
                 var rot2 = (rings - i2) * twistRate + this.time * 0.2;
                 var wobX3 = wobble * Math.sin(i2 * 0.5) * tD2, wobY3 = wobble * Math.cos(i2 * 0.5) * tD2;
                 var thick3 = depthStroke === 1 ? baseThick * Math.max(0.15, tD2) : baseThick;
@@ -708,7 +1003,9 @@ class MandalaScene {
                     var px2 = wobX3 + ringR2 * Math.cos(ang2), py2 = wobY3 + ringR2 * Math.sin(ang2);
                     if (s2 === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
                 }
-                ctx.strokeStyle = this.getColor(tD2, palIdx, colOff);
+                var c2 = this.getColor(tD2, palIdx, colOff);
+                ctx.strokeStyle = c2;
+                if (this.laserBloom > 0.1) ctx.shadowColor = c2;
                 ctx.lineWidth = thick3; ctx.stroke();
             }
         }

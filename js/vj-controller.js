@@ -185,8 +185,7 @@ class VJController {
         // If drawer is open, adapt view for active scene
         var drawer = document.getElementById("proportions-drawer");
         if (drawer && !drawer.classList.contains("closed")) {
-            if (idx === 5) this.showFerrofluidDrawer();
-            else if (idx === 4) this.showDancerDrawer();
+            this.showStudioPane(idx);
         }
 
         this.updateHUD();
@@ -631,6 +630,7 @@ class VJController {
             sliderThick.addEventListener("input", (e) => {
                 var val = parseFloat(e.target.value);
                 document.getElementById("val-line-thick").textContent = val.toFixed(1) + "px";
+                if (this.scenes[0] && this.scenes[0].setThickness) this.scenes[0].setThickness(val);
                 if (this.scenes[1] && this.scenes[1].setThickness) this.scenes[1].setThickness(val);
                 if (this.scenes[5] && this.scenes[5].setThickness) this.scenes[5].setThickness(val);
             });
@@ -800,52 +800,179 @@ class VJController {
 
         if (willOpen) {
             drawer.classList.remove("closed");
-            if (this.activeSceneIdx === 5) {
-                // Scene 6 (Ferrofluid Scene) active
-                this.showFerrofluidDrawer();
-            } else {
-                // Default to Scene 5 (Dancer) if on other ambient scenes
-                if (this.activeSceneIdx !== 4) {
-                    this.setScene(4);
-                }
-                this.showDancerDrawer();
-            }
+            this.showStudioPane(this.activeSceneIdx);
         } else {
             drawer.classList.add("closed");
         }
     }
 
-    showDancerDrawer() {
+    showStudioPane(sceneIdx) {
         var icon = document.getElementById("drawer-main-icon");
         var title = document.getElementById("drawer-main-title");
         var subtitle = document.getElementById("drawer-main-subtitle");
-        var dancerPane = document.getElementById("dancer-studio-pane");
-        var ferroPane = document.getElementById("ferrofluid-studio-pane");
 
-        if (icon) icon.textContent = "📐";
-        if (title) title.textContent = "Dancer Proportions Studio";
-        if (subtitle) subtitle.textContent = "WYSIWYG Real-Time Anatomy Tuner";
-        if (dancerPane) dancerPane.style.display = "block";
-        if (ferroPane) ferroPane.style.display = "none";
+        var paneIds = [
+            "mandala-studio-pane",
+            "ridgelines-studio-pane",
+            "bubbles-studio-pane",
+            "mountain-studio-pane",
+            "dancer-studio-pane",
+            "ferrofluid-studio-pane"
+        ];
 
-        this.toggleSceneLock(true); // Lock on dancer while tuning
-        this.syncProportionsUI();
+        paneIds.forEach((id, i) => {
+            var el = document.getElementById(id);
+            if (el) el.style.display = (i === sceneIdx) ? "block" : "none";
+        });
+
+        if (sceneIdx === 0) {
+            if (icon) icon.textContent = "🌀";
+            if (title) title.textContent = "Mandala Form Constants Studio";
+            if (subtitle) subtitle.textContent = "Sacred Geometry, Kaleidoscopes & Laser Bloom";
+            this.syncMandalaUI();
+        } else if (sceneIdx === 1) {
+            if (icon) icon.textContent = "📈";
+            if (title) title.textContent = "Topographic Ridgelines Studio";
+            if (subtitle) subtitle.textContent = "Surveyed Joy Division Elevation & Ribbons";
+            this.syncRidgelinesUI();
+        } else if (sceneIdx === 2) {
+            if (icon) icon.textContent = "🫧";
+            if (title) title.textContent = "Soap Bubble Surface Studio";
+            if (subtitle) subtitle.textContent = "Thin-Film Michel-Lévy Foam Physics";
+            this.syncBubblesUI();
+        } else if (sceneIdx === 3) {
+            if (icon) icon.textContent = "🏔️";
+            if (title) title.textContent = "Mountain Sunset Flight Studio";
+            if (subtitle) subtitle.textContent = "Aerial Paraglider & Topographic Shading";
+            this.syncMountainUI();
+        } else if (sceneIdx === 4) {
+            if (icon) icon.textContent = "📐";
+            if (title) title.textContent = "Dancer Proportions Studio";
+            if (subtitle) subtitle.textContent = "WYSIWYG Real-Time Anatomy Tuner";
+            this.toggleSceneLock(true);
+            this.syncProportionsUI();
+        } else if (sceneIdx === 5) {
+            if (icon) icon.textContent = "🧲";
+            if (title) title.textContent = "Ferrofluid Physics Lab";
+            if (subtitle) subtitle.textContent = "Real-Time Magnetic Hydrodynamics Studio";
+            this.syncFerrofluidUI();
+        }
+    }
+
+    showDancerDrawer() {
+        this.showStudioPane(4);
     }
 
     showFerrofluidDrawer() {
-        var icon = document.getElementById("drawer-main-icon");
-        var title = document.getElementById("drawer-main-title");
-        var subtitle = document.getElementById("drawer-main-subtitle");
-        var dancerPane = document.getElementById("dancer-studio-pane");
-        var ferroPane = document.getElementById("ferrofluid-studio-pane");
+        this.showStudioPane(5);
+    }
 
-        if (icon) icon.textContent = "🧲";
-        if (title) title.textContent = "Ferrofluid Physics Lab";
-        if (subtitle) subtitle.textContent = "Real-Time Magnetic Hydrodynamics Studio";
-        if (dancerPane) dancerPane.style.display = "none";
-        if (ferroPane) ferroPane.style.display = "block";
+    syncMandalaUI() {
+        var mandala = this.scenes[0];
+        if (!mandala) return;
 
-        this.syncFerrofluidUI();
+        var presetSel = document.getElementById("mandala-preset-select");
+        if (presetSel && mandala.currentPreset !== undefined) presetSel.value = String(mandala.currentPreset);
+
+        var palSel = document.getElementById("mandala-palette-select");
+        if (palSel && mandala.paletteIdx !== undefined) palSel.value = String(mandala.paletteIdx);
+
+        var thickSlider = document.getElementById("slider-mandala-thick");
+        var thickVal = document.getElementById("val-mandala-thick");
+        if (thickSlider && mandala.lineThickness !== undefined) {
+            var px = mandala.lineThickness * 2.0;
+            thickSlider.value = px.toFixed(1);
+            if (thickVal) thickVal.textContent = px.toFixed(1) + "px";
+        }
+
+        var bloomSlider = document.getElementById("slider-mandala-bloom");
+        var bloomVal = document.getElementById("val-mandala-bloom");
+        if (bloomSlider && mandala.laserBloom !== undefined) {
+            bloomSlider.value = mandala.laserBloom.toFixed(2);
+            if (bloomVal) bloomVal.textContent = mandala.laserBloom.toFixed(1) + "x";
+        }
+
+        var symSelect = document.getElementById("select-mandala-symmetry");
+        if (symSelect && mandala.symmetry !== undefined) symSelect.value = String(mandala.symmetry);
+
+        var speedSlider = document.getElementById("slider-mandala-speed");
+        var speedVal = document.getElementById("val-mandala-speed");
+        if (speedSlider && mandala.tunnelSpeed !== undefined) {
+            speedSlider.value = mandala.tunnelSpeed.toFixed(1);
+            if (speedVal) speedVal.textContent = mandala.tunnelSpeed.toFixed(1) + "x";
+        }
+
+        var spinSlider = document.getElementById("slider-mandala-spin");
+        var spinVal = document.getElementById("val-mandala-spin");
+        if (spinSlider && mandala.spinSpeed !== undefined) {
+            spinSlider.value = mandala.spinSpeed.toFixed(1);
+            if (spinVal) spinVal.textContent = mandala.spinSpeed.toFixed(1) + "x";
+        }
+
+        var audioSlider = document.getElementById("slider-mandala-audio");
+        var audioVal = document.getElementById("val-mandala-audio");
+        if (audioSlider && mandala.audioScale !== undefined) {
+            audioSlider.value = mandala.audioScale.toFixed(2);
+            if (audioVal) audioVal.textContent = mandala.audioScale.toFixed(1) + "x";
+        }
+
+        var zoomSlider = document.getElementById("slider-mandala-zoom");
+        var zoomVal = document.getElementById("val-mandala-zoom");
+        if (zoomSlider && mandala.zoom !== undefined) {
+            zoomSlider.value = mandala.zoom.toFixed(2);
+            if (zoomVal) zoomVal.textContent = mandala.zoom.toFixed(1) + "x";
+        }
+    }
+
+    syncRidgelinesUI() {
+        var ridge = this.scenes[1];
+        if (!ridge) return;
+
+        var mtnSel = document.getElementById("ridge-mountain-select");
+        if (mtnSel && ridge.currentTerrainIdx !== undefined) mtnSel.value = String(ridge.currentTerrainIdx);
+
+        var palSel = document.getElementById("ridge-palette-select");
+        if (palSel && ridge.currentPaletteIdx !== undefined) palSel.value = String(ridge.currentPaletteIdx);
+
+        var thickSlider = document.getElementById("slider-ridge-thick");
+        var thickVal = document.getElementById("val-ridge-thick");
+        if (thickSlider && ridge.ribbonThickness !== undefined) {
+            thickSlider.value = ridge.ribbonThickness.toFixed(1);
+            if (thickVal) thickVal.textContent = ridge.ribbonThickness.toFixed(1) + "px";
+        }
+    }
+
+    syncBubblesUI() {
+        var bubble = this.scenes[2];
+        if (!bubble) return;
+
+        var palSel = document.getElementById("bubble-palette-select");
+        if (palSel && bubble.paletteIdx !== undefined) palSel.value = String(bubble.paletteIdx);
+
+        var speedSlider = document.getElementById("slider-bubble-speed");
+        var speedVal = document.getElementById("val-bubble-speed");
+        if (speedSlider && bubble.danceSpeed !== undefined) {
+            speedSlider.value = bubble.danceSpeed.toFixed(2);
+            if (speedVal) speedVal.textContent = bubble.danceSpeed.toFixed(2);
+        }
+    }
+
+    syncMountainUI() {
+        var mtn = this.scenes[3];
+        if (!mtn) return;
+
+        var mtnSel = document.getElementById("mount-mountain-select");
+        if (mtnSel && mtn.currentTerrainIdx !== undefined) mtnSel.value = String(mtn.currentTerrainIdx);
+
+        var palSel = document.getElementById("mount-palette-select");
+        if (palSel && mtn.paletteIdx !== undefined) palSel.value = String(mtn.paletteIdx);
+
+        var sunSlider = document.getElementById("slider-mount-sun");
+        var sunVal = document.getElementById("val-mount-sun");
+        if (sunSlider && mtn.sunLight) {
+            sunSlider.value = mtn.sunLight.intensity.toFixed(1);
+            if (sunVal) sunVal.textContent = mtn.sunLight.intensity.toFixed(1) + "x";
+        }
     }
 
     /** Ferrofluid Physics Lab slider definitions (shared by binding and sync). */
@@ -1228,36 +1355,77 @@ class VJController {
             });
         });
 
-        // Copy code button
+        // Copy code button (Adaptive across all scenes)
         var btnCopy = document.getElementById("btn-prop-copy");
         if (btnCopy) {
             btnCopy.addEventListener("click", () => {
-                if (this.activeSceneIdx === 5) {
+                var toastText = "Copied configuration to clipboard!";
+                var codeStr = "";
+
+                if (this.activeSceneIdx === 0) {
+                    var mandala = this.scenes[0];
+                    if (!mandala) return;
+                    var mObj = {
+                        preset: mandala.currentPreset,
+                        palette: mandala.paletteIdx,
+                        lineThickness: mandala.lineThickness,
+                        laserBloom: mandala.laserBloom,
+                        symmetry: mandala.symmetry,
+                        tunnelSpeed: mandala.tunnelSpeed,
+                        spinSpeed: mandala.spinSpeed,
+                        audioScale: mandala.audioScale,
+                        zoom: mandala.zoom
+                    };
+                    codeStr = "// Mandala Form Constants Configuration:\nthis.mandalaConfig = " + JSON.stringify(mObj, null, 4) + ";";
+                    toastText = "Copied Mandala configuration to clipboard!";
+                } else if (this.activeSceneIdx === 1) {
+                    var ridge = this.scenes[1];
+                    if (!ridge) return;
+                    var rObj = {
+                        terrainIdx: ridge.currentTerrainIdx,
+                        paletteIdx: ridge.currentPaletteIdx,
+                        ribbonThickness: ridge.ribbonThickness
+                    };
+                    codeStr = "// Topographic Ridgelines Configuration:\nthis.ridgeConfig = " + JSON.stringify(rObj, null, 4) + ";";
+                    toastText = "Copied Ridgelines configuration to clipboard!";
+                } else if (this.activeSceneIdx === 2) {
+                    var bubble = this.scenes[2];
+                    if (!bubble) return;
+                    var bObj = {
+                        paletteIdx: bubble.paletteIdx,
+                        danceSpeed: bubble.danceSpeed
+                    };
+                    codeStr = "// Soap Bubble Surface Configuration:\nthis.bubbleConfig = " + JSON.stringify(bObj, null, 4) + ";";
+                    toastText = "Copied Bubble configuration to clipboard!";
+                } else if (this.activeSceneIdx === 3) {
+                    var mtn = this.scenes[3];
+                    if (!mtn) return;
+                    var mtObj = {
+                        terrainIdx: mtn.currentTerrainIdx,
+                        paletteIdx: mtn.paletteIdx
+                    };
+                    codeStr = "// Mountain Sunset Configuration:\nthis.mountainConfig = " + JSON.stringify(mtObj, null, 4) + ";";
+                    toastText = "Copied Mountain configuration to clipboard!";
+                } else if (this.activeSceneIdx === 5) {
                     var ferroScene = this.scenes[5];
                     if (!ferroScene) return;
                     var jsonStr = JSON.stringify(ferroScene.params, null, 4);
-                    var codeStr = "// Ferrofluid Physics Parameters:\nthis.params = " + jsonStr + ";";
-                    navigator.clipboard.writeText(codeStr).then(() => {
-                        var toast = document.getElementById("prop-toast");
-                        if (toast) {
-                            toast.textContent = "Copied ferrofluid physics parameters to clipboard!";
-                            toast.classList.remove("hidden");
-                            setTimeout(() => toast.classList.add("hidden"), 2200);
-                        }
-                    }).catch(() => {});
-                    return;
+                    codeStr = "// Ferrofluid Physics Parameters:\nthis.params = " + jsonStr + ";";
+                    toastText = "Copied ferrofluid physics parameters to clipboard!";
+                } else {
+                    var dancerScene = this.scenes[4];
+                    if (!dancerScene) return;
+                    var targetDancer = dancerScene.getActiveDancer ? dancerScene.getActiveDancer() : dancerScene;
+                    if (!targetDancer || !targetDancer.proportions) return;
+                    var jsonStr = JSON.stringify(targetDancer.proportions, null, 4);
+                    codeStr = "// Dancer Proportions Configuration:\nthis.proportions = " + jsonStr + ";";
+                    toastText = "Copied proportions config to clipboard!";
                 }
 
-                var dancerScene = this.scenes[4];
-                if (!dancerScene) return;
-                var targetDancer = dancerScene.getActiveDancer ? dancerScene.getActiveDancer() : dancerScene;
-                if (!targetDancer || !targetDancer.proportions) return;
-                var jsonStr = JSON.stringify(targetDancer.proportions, null, 4);
-                var codeStr = "// Dancer Proportions Configuration:\nthis.proportions = " + jsonStr + ";";
                 navigator.clipboard.writeText(codeStr).then(() => {
                     var toast = document.getElementById("prop-toast");
                     if (toast) {
-                        toast.textContent = "Copied proportions config to clipboard!";
+                        toast.textContent = toastText;
                         toast.classList.remove("hidden");
                         setTimeout(() => toast.classList.add("hidden"), 2200);
                     }
@@ -1265,27 +1433,386 @@ class VJController {
             });
         }
 
-        // Reset button
+        // Reset button (Adaptive across all scenes)
         var btnReset = document.getElementById("btn-prop-reset");
         if (btnReset) {
             btnReset.addEventListener("click", () => {
-                if (this.activeSceneIdx === 5) {
+                if (this.activeSceneIdx === 0) {
+                    var mandala = this.scenes[0];
+                    if (mandala) {
+                        mandala.lineThickness = 1.0;
+                        mandala.laserBloom = 1.2;
+                        mandala.symmetry = 0;
+                        mandala.tunnelSpeed = 1.0;
+                        mandala.spinSpeed = 1.0;
+                        mandala.audioScale = 1.0;
+                        mandala.resetView();
+                        this.syncMandalaUI();
+                    }
+                } else if (this.activeSceneIdx === 1) {
+                    var ridge = this.scenes[1];
+                    if (ridge) {
+                        ridge.setThickness(4.0);
+                        this.syncRidgelinesUI();
+                    }
+                } else if (this.activeSceneIdx === 2) {
+                    var bubble = this.scenes[2];
+                    if (bubble) {
+                        bubble.danceSpeed = 0.16;
+                        this.syncBubblesUI();
+                    }
+                } else if (this.activeSceneIdx === 3) {
+                    var mtn = this.scenes[3];
+                    if (mtn && mtn.sunLight) {
+                        mtn.sunLight.intensity = 1.0;
+                        this.syncMountainUI();
+                    }
+                } else if (this.activeSceneIdx === 5) {
                     var ferroScene = this.scenes[5];
                     if (ferroScene) {
                         if (ferroScene.reseed) ferroScene.reseed("labyrinth", true);
                         if (ferroScene.resetCamera) ferroScene.resetCamera();
                         this.syncFerrofluidUI();
                     }
-                    return;
+                } else {
+                    var config = presets["default"];
+                    var dancer = this.scenes[4];
+                    if (dancer && dancer.applyProportions) {
+                        dancer.applyProportions(config);
+                    }
+                    if (presetSelect) presetSelect.value = "female";
+                    this.syncProportionsUI();
                 }
+            });
+        }
 
-                var config = presets["default"];
-                var dancer = this.scenes[4];
-                if (dancer && dancer.applyProportions) {
-                    dancer.applyProportions(config);
+        // ==============================================================
+        // Mandala Studio Controls Bindings
+        // ==============================================================
+        var mandalaPresetSel = document.getElementById("mandala-preset-select");
+        if (mandalaPresetSel) {
+            mandalaPresetSel.addEventListener("change", (e) => {
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setPreset) {
+                    mandala.setPreset(parseInt(e.target.value));
+                    this.syncMandalaUI();
                 }
-                if (presetSelect) presetSelect.value = "female";
-                this.syncProportionsUI();
+            });
+        }
+
+        var mandalaPalSel = document.getElementById("mandala-palette-select");
+        if (mandalaPalSel) {
+            mandalaPalSel.addEventListener("change", (e) => {
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setPalette) {
+                    mandala.setPalette(parseInt(e.target.value));
+                    this.syncMandalaUI();
+                }
+            });
+        }
+
+        var mandalaThick = document.getElementById("slider-mandala-thick");
+        if (mandalaThick) {
+            mandalaThick.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-mandala-thick");
+                if (valEl) valEl.textContent = val.toFixed(1) + "px";
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setThickness) {
+                    mandala.setThickness(val * 2.0);
+                }
+                var hudThick = document.getElementById("slider-line-thick");
+                if (hudThick) {
+                    hudThick.value = (val * 2.0).toFixed(1);
+                    var hudVal = document.getElementById("val-line-thick");
+                    if (hudVal) hudVal.textContent = (val * 2.0).toFixed(1) + "px";
+                }
+            });
+        }
+
+        var mandalaBloom = document.getElementById("slider-mandala-bloom");
+        if (mandalaBloom) {
+            mandalaBloom.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-mandala-bloom");
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setLaserBloom) mandala.setLaserBloom(val);
+            });
+        }
+
+        var mandalaSym = document.getElementById("select-mandala-symmetry");
+        if (mandalaSym) {
+            mandalaSym.addEventListener("change", (e) => {
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setSymmetry) mandala.setSymmetry(e.target.value);
+            });
+        }
+
+        var mandalaSpeed = document.getElementById("slider-mandala-speed");
+        if (mandalaSpeed) {
+            mandalaSpeed.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-mandala-speed");
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setTunnelSpeed) mandala.setTunnelSpeed(val);
+            });
+        }
+
+        var mandalaSpin = document.getElementById("slider-mandala-spin");
+        if (mandalaSpin) {
+            mandalaSpin.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-mandala-spin");
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setSpinSpeed) mandala.setSpinSpeed(val);
+            });
+        }
+
+        var mandalaAudio = document.getElementById("slider-mandala-audio");
+        if (mandalaAudio) {
+            mandalaAudio.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-mandala-audio");
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setAudioScale) mandala.setAudioScale(val);
+            });
+        }
+
+        var mandalaZoom = document.getElementById("slider-mandala-zoom");
+        if (mandalaZoom) {
+            mandalaZoom.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-mandala-zoom");
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
+                var mandala = this.scenes[0];
+                if (mandala && mandala.setZoom) mandala.setZoom(val);
+            });
+        }
+
+        var btnMandalaRandom = document.getElementById("btn-mandala-random");
+        if (btnMandalaRandom) {
+            btnMandalaRandom.addEventListener("click", () => {
+                var mandala = this.scenes[0];
+                if (mandala && mandala.randomizeGeometry) {
+                    mandala.randomizeGeometry();
+                    this.syncMandalaUI();
+                }
+            });
+        }
+
+        var btnMandalaNextPreset = document.getElementById("btn-mandala-next-preset");
+        if (btnMandalaNextPreset) {
+            btnMandalaNextPreset.addEventListener("click", () => {
+                var mandala = this.scenes[0];
+                if (mandala && mandala.cyclePreset) {
+                    mandala.cyclePreset();
+                    this.syncMandalaUI();
+                }
+            });
+        }
+
+        var btnMandalaNextPal = document.getElementById("btn-mandala-next-palette");
+        if (btnMandalaNextPal) {
+            btnMandalaNextPal.addEventListener("click", () => {
+                var mandala = this.scenes[0];
+                if (mandala && mandala.cyclePalette) {
+                    mandala.cyclePalette();
+                    this.syncMandalaUI();
+                }
+            });
+        }
+
+        var btnMandalaResetView = document.getElementById("btn-mandala-reset-view");
+        if (btnMandalaResetView) {
+            btnMandalaResetView.addEventListener("click", () => {
+                var mandala = this.scenes[0];
+                if (mandala && mandala.resetView) {
+                    mandala.resetView();
+                    this.syncMandalaUI();
+                }
+            });
+        }
+
+        // ==============================================================
+        // Ridgelines Studio Controls Bindings
+        // ==============================================================
+        var ridgeMtnSel = document.getElementById("ridge-mountain-select");
+        if (ridgeMtnSel) {
+            ridgeMtnSel.addEventListener("change", (e) => {
+                var ridge = this.scenes[1];
+                if (ridge && ridge.setTerrainIndex) {
+                    ridge.setTerrainIndex(parseInt(e.target.value));
+                    this.syncRidgelinesUI();
+                }
+            });
+        }
+
+        var ridgePalSel = document.getElementById("ridge-palette-select");
+        if (ridgePalSel) {
+            ridgePalSel.addEventListener("change", (e) => {
+                var ridge = this.scenes[1];
+                if (ridge && ridge.palettes) {
+                    ridge.currentPaletteIdx = parseInt(e.target.value);
+                    this.syncRidgelinesUI();
+                }
+            });
+        }
+
+        var ridgeThick = document.getElementById("slider-ridge-thick");
+        if (ridgeThick) {
+            ridgeThick.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-ridge-thick");
+                if (valEl) valEl.textContent = val.toFixed(1) + "px";
+                var ridge = this.scenes[1];
+                if (ridge && ridge.setThickness) ridge.setThickness(val);
+            });
+        }
+
+        var btnRidgeNextMtn = document.getElementById("btn-ridge-next-mountain");
+        if (btnRidgeNextMtn) {
+            btnRidgeNextMtn.addEventListener("click", () => {
+                var ridge = this.scenes[1];
+                if (ridge && ridge.switchTerrain) {
+                    ridge.switchTerrain();
+                    this.syncRidgelinesUI();
+                }
+            });
+        }
+
+        var btnRidgeNextPal = document.getElementById("btn-ridge-next-palette");
+        if (btnRidgeNextPal) {
+            btnRidgeNextPal.addEventListener("click", () => {
+                var ridge = this.scenes[1];
+                if (ridge && ridge.palettes) {
+                    ridge.currentPaletteIdx = (ridge.currentPaletteIdx + 1) % ridge.palettes.length;
+                    this.syncRidgelinesUI();
+                }
+            });
+        }
+
+        // ==============================================================
+        // Bubbles Studio Controls Bindings
+        // ==============================================================
+        var bubblePalSel = document.getElementById("bubble-palette-select");
+        if (bubblePalSel) {
+            bubblePalSel.addEventListener("change", (e) => {
+                var bubble = this.scenes[2];
+                if (bubble) {
+                    bubble.paletteIdx = parseInt(e.target.value);
+                    this.syncBubblesUI();
+                }
+            });
+        }
+
+        var bubbleSpeed = document.getElementById("slider-bubble-speed");
+        if (bubbleSpeed) {
+            bubbleSpeed.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-bubble-speed");
+                if (valEl) valEl.textContent = val.toFixed(2);
+                var bubble = this.scenes[2];
+                if (bubble) bubble.danceSpeed = val;
+            });
+        }
+
+        var btnBubbleAgitate = document.getElementById("btn-bubble-agitate");
+        if (btnBubbleAgitate) {
+            btnBubbleAgitate.addEventListener("click", () => {
+                var bubble = this.scenes[2];
+                if (bubble && bubble.agitateCluster) bubble.agitateCluster();
+            });
+        }
+
+        var btnBubbleDroplets = document.getElementById("btn-bubble-droplets");
+        if (btnBubbleDroplets) {
+            btnBubbleDroplets.addEventListener("click", () => {
+                var bubble = this.scenes[2];
+                if (bubble && bubble.spawnDroplets) {
+                    var w = window.innerWidth, h = window.innerHeight;
+                    bubble.spawnDroplets(w / 2, h / 2, 20);
+                }
+            });
+        }
+
+        var btnBubbleInvert = document.getElementById("btn-bubble-invert");
+        if (btnBubbleInvert) {
+            btnBubbleInvert.addEventListener("click", () => {
+                var bubble = this.scenes[2];
+                if (bubble) bubble.flowDirection *= -1;
+            });
+        }
+
+        var btnBubbleNextPal = document.getElementById("btn-bubble-next-palette");
+        if (btnBubbleNextPal) {
+            btnBubbleNextPal.addEventListener("click", () => {
+                var bubble = this.scenes[2];
+                if (bubble && bubble.palettes) {
+                    bubble.paletteIdx = (bubble.paletteIdx + 1) % bubble.palettes.length;
+                    this.syncBubblesUI();
+                }
+            });
+        }
+
+        // ==============================================================
+        // Mountain Studio Controls Bindings
+        // ==============================================================
+        var mountMtnSel = document.getElementById("mount-mountain-select");
+        if (mountMtnSel) {
+            mountMtnSel.addEventListener("change", (e) => {
+                var mtn = this.scenes[3];
+                if (mtn && mtn.setTerrainIndex) {
+                    mtn.setTerrainIndex(parseInt(e.target.value));
+                    this.syncMountainUI();
+                }
+            });
+        }
+
+        var mountPalSel = document.getElementById("mount-palette-select");
+        if (mountPalSel) {
+            mountPalSel.addEventListener("change", (e) => {
+                var mtn = this.scenes[3];
+                if (mtn) {
+                    mtn.paletteIdx = parseInt(e.target.value);
+                    this.syncMountainUI();
+                }
+            });
+        }
+
+        var mountSun = document.getElementById("slider-mount-sun");
+        if (mountSun) {
+            mountSun.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-mount-sun");
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
+                var mtn = this.scenes[3];
+                if (mtn && mtn.sunLight) mtn.sunLight.intensity = val;
+            });
+        }
+
+        var btnMountNextMtn = document.getElementById("btn-mount-next-mountain");
+        if (btnMountNextMtn) {
+            btnMountNextMtn.addEventListener("click", () => {
+                var mtn = this.scenes[3];
+                if (mtn && mtn.switchTerrain) {
+                    mtn.switchTerrain();
+                    this.syncMountainUI();
+                }
+            });
+        }
+
+        var btnMountNextPal = document.getElementById("btn-mount-next-palette");
+        if (btnMountNextPal) {
+            btnMountNextPal.addEventListener("click", () => {
+                var mtn = this.scenes[3];
+                if (mtn && mtn.palettes) {
+                    mtn.paletteIdx = (mtn.paletteIdx + 1) % mtn.palettes.length;
+                    this.syncMountainUI();
+                }
             });
         }
 

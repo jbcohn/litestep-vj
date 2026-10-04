@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4027</title>
+    <title>LiteStep VJ vers. 4028</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,7 +45,7 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4027</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4028</span></h1>
                     <div class="hud-scene-status">
                         <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
@@ -185,9 +185,298 @@
             <!-- Full Drawer Scrollable Body -->
             <div class="drawer-scroll-body">
                 <!-- ============================================================== -->
-                <!-- PANE A: DANCER PROPORTIONS STUDIO                              -->
+                <!-- PANE 1: MANDALA FORM CONSTANTS STUDIO                          -->
                 <!-- ============================================================== -->
-                <div id="dancer-studio-pane">
+                <div id="mandala-studio-pane" style="display: none;">
+                    <div class="drawer-section dropdowns-section">
+                        <div class="dropdown-row">
+                            <div class="dropdown-item">
+                                <label class="section-label" for="mandala-preset-select">Form Preset</label>
+                                <select id="mandala-preset-select" class="drawer-dropdown">
+                                    <option value="0" selected>0: Conformal LogHex Vortex</option>
+                                    <option value="1">1: 3D Wireframe Wormhole</option>
+                                    <option value="2">2: Log-Conformal Spiral</option>
+                                    <option value="3">3: Hypercube Perspective</option>
+                                    <option value="4">4: Spherical Bulge Dome</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="mandala-palette-select">Color Spectrum</label>
+                                <select id="mandala-palette-select" class="drawer-dropdown">
+                                    <option value="0" selected>0: Cosmic Aurora</option>
+                                    <option value="1">1: Neon Cyberpunk</option>
+                                    <option value="2">2: Rainbow Prism</option>
+                                    <option value="3">3: Pastel Dream</option>
+                                    <option value="4">4: Lava Flame</option>
+                                    <option value="5">5: Ocean Breeze</option>
+                                    <option value="6">6: Gold &amp; Onyx</option>
+                                    <option value="7">7: Forest Sage</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="prop-group">
+                        <div class="group-header">Sacred Optics &amp; Symmetry</div>
+
+                        <div class="prop-row highlight-row" title="Master line & wireframe stroke thickness">
+                            <span class="prop-label">📏 Line Thickness</span>
+                            <input type="range" class="prop-slider" id="slider-mandala-thick" min="0.5" max="8.0" step="0.1" value="2.0">
+                            <span class="prop-val" id="val-mandala-thick">2.0px</span>
+                        </div>
+
+                        <div class="prop-row highlight-row" title="Laser bloom halo & white-hot additive glow intensity">
+                            <span class="prop-label">✨ Laser Bloom</span>
+                            <input type="range" class="prop-slider" id="slider-mandala-bloom" min="0.0" max="2.5" step="0.05" value="1.2">
+                            <span class="prop-val" id="val-mandala-bloom">1.2x</span>
+                        </div>
+
+                        <div class="prop-row" title="Kaleidoscope radial mirror symmetry folds (0 = Off)">
+                            <span class="prop-label">🪞 Kaleidoscope</span>
+                            <select id="select-mandala-symmetry" class="drawer-dropdown" style="width: auto; padding: 2px 6px; font-size: 0.72rem;">
+                                <option value="0" selected>Off (Classic)</option>
+                                <option value="4">4-Fold Mirror</option>
+                                <option value="6">6-Fold Hex</option>
+                                <option value="8">8-Fold Octa</option>
+                                <option value="12">12-Fold Dodeca</option>
+                                <option value="16">16-Fold High</option>
+                                <option value="24">24-Fold Prismatic</option>
+                            </select>
+                        </div>
+
+                        <div class="prop-row" title="Continuous warp-tunnel Z-flight speed into infinite geometric depth">
+                            <span class="prop-label">🚀 Tunnel Flight</span>
+                            <input type="range" class="prop-slider" id="slider-mandala-speed" min="-3.0" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-mandala-speed">1.0x</span>
+                        </div>
+
+                        <div class="prop-row" title="Base rotation spin speed">
+                            <span class="prop-label">🔄 Spin Speed</span>
+                            <input type="range" class="prop-slider" id="slider-mandala-spin" min="0.0" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-mandala-spin">1.0x</span>
+                        </div>
+
+                        <div class="prop-row" title="Audio kick shockwave & bass radial snap multiplier">
+                            <span class="prop-label">⚡ Audio Reactivity</span>
+                            <input type="range" class="prop-slider" id="slider-mandala-audio" min="0.0" max="2.5" step="0.05" value="1.0">
+                            <span class="prop-val" id="val-mandala-audio">1.0x</span>
+                        </div>
+
+                        <div class="prop-row" title="Mandala camera magnification">
+                            <span class="prop-label">🔍 Zoom</span>
+                            <input type="range" class="prop-slider" id="slider-mandala-zoom" min="0.4" max="3.5" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-mandala-zoom">1.0x</span>
+                        </div>
+                    </div>
+
+                    <div class="prop-group" style="padding: 10px 12px;">
+                        <div class="group-header" style="margin-bottom: 8px;">
+                            <span>⚡ Mandala Actions</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <button id="btn-mandala-random" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                ↺ Mutate / Shuffle
+                            </button>
+                            <button id="btn-mandala-next-preset" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🌀 Next Preset
+                            </button>
+                            <button id="btn-mandala-next-palette" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🎨 Next Palette
+                            </button>
+                            <button id="btn-mandala-reset-view" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🎯 Reset View
+                            </button>
+                        </div>
+                        <div class="dance-checklist-desc" style="margin-top: 10px; font-size: 0.70rem; color: #94a3b8; line-height: 1.4;">
+                            • <strong>Drag:</strong> Spin mandala rotation.<br>
+                            • <strong>Shift / Option + Drag:</strong> Pan geometry on canvas.<br>
+                            • <strong>Scroll Wheel / Pinch:</strong> Zoom in and out.<br>
+                            • <strong>Double-Click:</strong> Reset pan &amp; zoom to center.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 2: TOPOGRAPHIC RIDGELINES STUDIO                          -->
+                <!-- ============================================================== -->
+                <div id="ridgelines-studio-pane" style="display: none;">
+                    <div class="drawer-section dropdowns-section">
+                        <div class="dropdown-row">
+                            <div class="dropdown-item">
+                                <label class="section-label" for="ridge-mountain-select">Surveyed Mountain</label>
+                                <select id="ridge-mountain-select" class="drawer-dropdown">
+                                    <option value="0" selected>Mt. Diablo (3,849 FT)</option>
+                                    <option value="1">Mt. Shasta (14,179 FT)</option>
+                                    <option value="2">Mt. Tamalpais (2,571 FT)</option>
+                                    <option value="3">Mt. Vaca (2,819 FT)</option>
+                                    <option value="4">Mt. Whitney (14,505 FT)</option>
+                                    <option value="5">Monroe Peak (11,227 FT)</option>
+                                    <option value="6">Mt. Nebo (11,928 FT)</option>
+                                    <option value="7">Maui // Haleakalā (10,023 FT)</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="ridge-palette-select">Ribbon Palette</label>
+                                <select id="ridge-palette-select" class="drawer-dropdown">
+                                    <option value="0" selected>Aqua &amp; Magenta</option>
+                                    <option value="1">Lime &amp; Violet</option>
+                                    <option value="2">Amber &amp; Cyan</option>
+                                    <option value="3">Rose &amp; Teal</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="prop-group">
+                        <div class="group-header">Topographic Flight &amp; Ribbons</div>
+
+                        <div class="prop-row highlight-row" title="Ribbon contour line extrusion thickness">
+                            <span class="prop-label">📏 Ribbon Thickness</span>
+                            <input type="range" class="prop-slider" id="slider-ridge-thick" min="1.5" max="10.0" step="0.5" value="4.0">
+                            <span class="prop-val" id="val-ridge-thick">4.0px</span>
+                        </div>
+
+                        <div class="prop-row" title="Paraglider sightseeing flyover speed">
+                            <span class="prop-label">🦅 Flyover Speed</span>
+                            <input type="range" class="prop-slider" id="slider-ridge-speed" min="0.2" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-ridge-speed">1.0x</span>
+                        </div>
+                    </div>
+
+                    <div class="prop-group" style="padding: 10px 12px;">
+                        <div class="group-header" style="margin-bottom: 8px;">
+                            <span>⚡ Ridgelines Actions</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <button id="btn-ridge-next-mountain" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🏔️ Next Mountain
+                            </button>
+                            <button id="btn-ridge-next-palette" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🎨 Next Palette
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 3: SOAP BUBBLE SURFACE STUDIO                             -->
+                <!-- ============================================================== -->
+                <div id="bubbles-studio-pane" style="display: none;">
+                    <div class="drawer-section dropdowns-section">
+                        <div class="dropdown-row">
+                            <div class="dropdown-item full-width">
+                                <label class="section-label" for="bubble-palette-select">Thin-Film Optical Theme</label>
+                                <select id="bubble-palette-select" class="drawer-dropdown">
+                                    <option value="0" selected>Iridescent Soap Film (Michel-Lévy)</option>
+                                    <option value="1">Neon Bioluminescent</option>
+                                    <option value="2">Minimal Platinum Rings</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="prop-group">
+                        <div class="group-header">Foam Cluster Dynamics</div>
+
+                        <div class="prop-row highlight-row" title="Liquid style choreography undulating flow speed">
+                            <span class="prop-label">🌊 Flow Speed</span>
+                            <input type="range" class="prop-slider" id="slider-bubble-speed" min="0.04" max="0.60" step="0.02" value="0.16">
+                            <span class="prop-val" id="val-bubble-speed">0.16</span>
+                        </div>
+
+                        <div class="prop-row" title="Film interference phase shimmer speed">
+                            <span class="prop-label">✨ Shimmer Speed</span>
+                            <input type="range" class="prop-slider" id="slider-bubble-shimmer" min="0.2" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-bubble-shimmer">1.0x</span>
+                        </div>
+                    </div>
+
+                    <div class="prop-group" style="padding: 10px 12px;">
+                        <div class="group-header" style="margin-bottom: 8px;">
+                            <span>⚡ Bubble Actions</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <button id="btn-bubble-agitate" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                ⚡ Agitate Foam
+                            </button>
+                            <button id="btn-bubble-droplets" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🫧 Pop Droplets
+                            </button>
+                            <button id="btn-bubble-invert" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🔄 Invert Flow
+                            </button>
+                            <button id="btn-bubble-next-palette" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🎨 Next Palette
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 4: SHADED MOUNTAIN SUNSET STUDIO                          -->
+                <!-- ============================================================== -->
+                <div id="mountain-studio-pane" style="display: none;">
+                    <div class="drawer-section dropdowns-section">
+                        <div class="dropdown-row">
+                            <div class="dropdown-item">
+                                <label class="section-label" for="mount-mountain-select">Surveyed Mountain</label>
+                                <select id="mount-mountain-select" class="drawer-dropdown">
+                                    <option value="0" selected>Mt. Diablo (3,849 FT)</option>
+                                    <option value="1">Mt. Shasta (14,179 FT)</option>
+                                    <option value="2">Mt. Tamalpais (2,571 FT)</option>
+                                    <option value="3">Mt. Vaca (2,819 FT)</option>
+                                    <option value="4">Mt. Whitney (14,505 FT)</option>
+                                    <option value="5">Monroe Peak (11,227 FT)</option>
+                                    <option value="6">Mt. Nebo (11,928 FT)</option>
+                                    <option value="7">Maui // Haleakalā (10,023 FT)</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="mount-palette-select">Sunset Palette</label>
+                                <select id="mount-palette-select" class="drawer-dropdown">
+                                    <option value="0" selected>Paraglider Sunset (Classic)</option>
+                                    <option value="1">Golden Hour Thermal</option>
+                                    <option value="2">Electric Aurora Dusk</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="prop-group">
+                        <div class="group-header">Aerial Sunset Environment</div>
+
+                        <div class="prop-row" title="Turntable rotation speed">
+                            <span class="prop-label">🔄 Orbit Speed</span>
+                            <input type="range" class="prop-slider" id="slider-mount-speed" min="0.2" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-mount-speed">1.0x</span>
+                        </div>
+
+                        <div class="prop-row highlight-row" title="Sunset sunlight intensity">
+                            <span class="prop-label">☀️ Sun Light</span>
+                            <input type="range" class="prop-slider" id="slider-mount-sun" min="0.5" max="2.5" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-mount-sun">1.0x</span>
+                        </div>
+                    </div>
+
+                    <div class="prop-group" style="padding: 10px 12px;">
+                        <div class="group-header" style="margin-bottom: 8px;">
+                            <span>⚡ Mountain Actions</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <button id="btn-mount-next-mountain" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🏔️ Next Mountain
+                            </button>
+                            <button id="btn-mount-next-palette" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;">
+                                🎨 Next Palette
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 5: DANCER PROPORTIONS STUDIO                              -->
+                <!-- ============================================================== -->
+                <div id="dancer-studio-pane" style="display: none;">
                     <!-- Troupe Formation, Sync & Target Dancer -->
                     <div class="drawer-section troupe-section">
                     <label class="section-label">Troupe Formation &amp; Sync</label>
