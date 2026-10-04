@@ -134,7 +134,7 @@ class FerrofluidScene {
 
         // Grid sizes (2x resolution: 768² phase field, 512² dye)
         this.N = 768;      // phase field & height field
-        this.NL = 128;     // low-res (dipolar kernel, spikes, flow)
+        this.NL = 256;     // low-res (dipolar kernel, spikes, flow)
         this.ND = 512;     // dye
         this.rt = {};
         this.mat = {};
@@ -646,7 +646,7 @@ class FerrofluidScene {
         this._pass(M.down, R.low);
 
         // 2. Long-range dipolar kernel K∗ρ (separable Gaussian, range = film thickness)
-        M.blur.uniforms.u_sigma.value = P.thickness;
+        M.blur.uniforms.u_sigma.value = Math.max(1.2, P.thickness * 1.5);
         M.blur.uniforms.u_src.value = R.low.texture;
         M.blur.uniforms.u_dir.value.set(1 / NL, 0);
         this._pass(M.blur, R.blurTmp);
@@ -654,10 +654,10 @@ class FerrofluidScene {
         M.blur.uniforms.u_dir.value.set(0, 1 / NL);
         this._pass(M.blur, R.K);
 
-        // 3. Volume reduction 128 → 16 → 1
+        // 3. Volume reduction 256 → 16 → 1
         M.reduce.uniforms.u_src.value = R.low.texture;
         M.reduce.uniforms.u_srcSize.value = NL;
-        M.reduce.uniforms.u_block.value = 8;
+        M.reduce.uniforms.u_block.value = 16;
         this._pass(M.reduce, R.red16);
         M.reduce.uniforms.u_src.value = R.red16.texture;
         M.reduce.uniforms.u_srcSize.value = 16;
@@ -678,7 +678,7 @@ class FerrofluidScene {
         var pu = M.phase.uniforms;
         pu.u_K.value = R.K.texture;
         pu.u_ctrl.value = R.ctrlA.texture;
-        pu.u_eps2.value = P.tension;
+        pu.u_eps2.value = Math.max(0.55, P.tension);
         pu.u_brep.value = this.brep;
         pu.u_pull.value = P.magnetPull * (0.4 + 0.6 * Math.min(1.5, this.fieldEff));
         pu.u_local.value = P.focus;
@@ -1151,6 +1151,25 @@ float vnoise(vec2 p) {
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+float sampleBS_K(sampler2D tex, vec2 uv, float n) {
+    vec2 vc = uv * n - 0.5;
+    vec2 i = floor(vc);
+    vec2 f = vc - i;
+    vec2 f2 = f * f, f3 = f2 * f;
+    vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+    vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    vec2 w3 = f3 / 6.0;
+    vec2 g0 = w0 + w1, g1 = w2 + w3;
+    vec2 h0 = (i - 1.0 + w1 / g0 + 0.5) / n;
+    vec2 h1 = (i + 1.0 + w3 / g1 + 0.5) / n;
+    float a = texture2D(tex, vec2(h0.x, h0.y)).r;
+    float b = texture2D(tex, vec2(h1.x, h0.y)).r;
+    float c = texture2D(tex, vec2(h0.x, h1.y)).r;
+    float d = texture2D(tex, vec2(h1.x, h1.y)).r;
+    return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
+}
+
 void main() {
     float r = length(vUv - 0.5);
     if (r > 0.46) { gl_FragColor = vec4(-1.0, 0.0, 0.0, 1.0); return; }
@@ -1164,9 +1183,11 @@ void main() {
     float sw = texture2D(u_state, vUv - u_px).r;
     float nw = texture2D(u_state, vUv + vec2(-u_px.x, u_px.y)).r;
     float se = texture2D(u_state, vUv + vec2(u_px.x, -u_px.y)).r;
-    float lap = (0.2 * (n + s + e + w) + 0.05 * (ne + nw + se + sw) - c) * 4.0;
+    
+    // 4th-order isotropic discrete Laplacian (cancels (dx^4 + dy^4) grid anisotropy)
+    float lap = (4.0 * (n + s + e + w) + (ne + nw + se + sw) - 20.0 * c) / 6.0;
 
-    float K = texture2D(u_K, vUv).r;
+    float K = sampleBS_K(u_K, vUv, 256.0);
     float lam = texture2D(u_ctrl, vec2(0.5)).r;
 
     vec2 dm = vUv - u_magpos;
