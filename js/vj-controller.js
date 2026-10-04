@@ -157,7 +157,17 @@ class VJController {
     }
 
     setScene(idx) {
-        if (idx === this.activeSceneIdx || idx < 0 || idx >= this.scenes.length) return;
+        if (idx < 0 || idx >= this.scenes.length) return;
+        var drawer = document.getElementById("proportions-drawer");
+        var isDrawerOpen = drawer && !drawer.classList.contains("closed");
+
+        if (idx === this.activeSceneIdx) {
+            if (isDrawerOpen && this._lastOpenPaneIdx !== idx) {
+                this.showStudioPane(idx);
+            }
+            return;
+        }
+
         this.previousSceneIdx = this.activeSceneIdx;
         this.activeSceneIdx   = idx;
         this.crossfadeAlpha   = 0.0;
@@ -183,8 +193,7 @@ class VJController {
         if (s.mutate)            s.mutate();
 
         // If drawer is open, adapt view for active scene
-        var drawer = document.getElementById("proportions-drawer");
-        if (drawer && !drawer.classList.contains("closed")) {
+        if (isDrawerOpen) {
             this.showStudioPane(idx);
         }
 
@@ -314,13 +323,11 @@ class VJController {
 
         var btnProp = document.getElementById("btn-proportions");
         if (btnProp) {
-            if (this.activeSceneIdx === 5) {
-                btnProp.innerHTML = "🧲 Lab (P)";
-                btnProp.title = "Ferrofluid Physics Lab Studio (P)";
-            } else {
-                btnProp.innerHTML = "📐 Studio (P)";
-                btnProp.title = "Dancer Proportions Studio (P)";
-            }
+            var icons = ["🌀", "📈", "🫧", "🏔️", "📐", "🧲"];
+            var labels = ["Mandala Form Constants", "Topographic Ridgelines", "Soap Bubble Surface", "Mountain Sunset Flight", "Dancer Proportions", "Ferrofluid Physics Lab"];
+            var label = (this.activeSceneIdx === 5) ? "🧲 Lab (P)" : (icons[this.activeSceneIdx] || "📐") + " Studio (P)";
+            btnProp.innerHTML = label;
+            btnProp.title = (labels[this.activeSceneIdx] || "Scene") + " Studio (P)";
         }
 
         this.broadcastRemoteState();
@@ -807,6 +814,13 @@ class VJController {
     }
 
     showStudioPane(sceneIdx) {
+        this._lastOpenPaneIdx = sceneIdx;
+        var drawer = document.getElementById("proportions-drawer");
+        if (drawer) {
+            var scrollBody = drawer.querySelector(".drawer-scroll-body");
+            if (scrollBody) scrollBody.scrollTop = 0;
+        }
+
         var icon = document.getElementById("drawer-main-icon");
         var title = document.getElementById("drawer-main-title");
         var subtitle = document.getElementById("drawer-main-subtitle");
@@ -838,7 +852,7 @@ class VJController {
         } else if (sceneIdx === 2) {
             if (icon) icon.textContent = "🫧";
             if (title) title.textContent = "Soap Bubble Surface Studio";
-            if (subtitle) subtitle.textContent = "Thin-Film Michel-Lévy Foam Physics";
+            if (subtitle) subtitle.textContent = "Looping Foam Stream & Michel-Lévy Optics";
             this.syncBubblesUI();
         } else if (sceneIdx === 3) {
             if (icon) icon.textContent = "🏔️";
@@ -856,6 +870,15 @@ class VJController {
             if (title) title.textContent = "Ferrofluid Physics Lab";
             if (subtitle) subtitle.textContent = "Real-Time Magnetic Hydrodynamics Studio";
             this.syncFerrofluidUI();
+        }
+
+        var btnProp = document.getElementById("btn-proportions");
+        if (btnProp) {
+            var icons = ["🌀", "📈", "🫧", "🏔️", "📐", "🧲"];
+            var labels = ["Mandala", "Ridges", "Bubbles", "Mountain", "Dancer", "Ferrofluid"];
+            var label = (sceneIdx === 5) ? "🧲 Lab (P)" : (icons[sceneIdx] || "📐") + " Studio (P)";
+            btnProp.innerHTML = label;
+            btnProp.title = (labels[sceneIdx] || "Scene") + " Studio Drawer (P)";
         }
     }
 
@@ -949,11 +972,24 @@ class VJController {
         var palSel = document.getElementById("bubble-palette-select");
         if (palSel && bubble.paletteIdx !== undefined) palSel.value = String(bubble.paletteIdx);
 
+        var obsSel = document.getElementById("bubble-obstacles-select");
+        if (obsSel && bubble.numObstacles !== undefined) obsSel.value = String(bubble.numObstacles);
+
+        var dirSel = document.getElementById("bubble-direction-select");
+        if (dirSel && bubble.flowDirection !== undefined) dirSel.value = String(bubble.flowDirection);
+
         var speedSlider = document.getElementById("slider-bubble-speed");
         var speedVal = document.getElementById("val-bubble-speed");
-        if (speedSlider && bubble.danceSpeed !== undefined) {
-            speedSlider.value = bubble.danceSpeed.toFixed(2);
-            if (speedVal) speedVal.textContent = bubble.danceSpeed.toFixed(2);
+        if (speedSlider && bubble.flowSpeed !== undefined) {
+            speedSlider.value = bubble.flowSpeed.toFixed(1);
+            if (speedVal) speedVal.textContent = bubble.flowSpeed.toFixed(1) + "x";
+        }
+
+        var shimmerSlider = document.getElementById("slider-bubble-shimmer");
+        var shimmerVal = document.getElementById("val-bubble-shimmer");
+        if (shimmerSlider && bubble.shimmerSpeed !== undefined) {
+            shimmerSlider.value = bubble.shimmerSpeed.toFixed(1);
+            if (shimmerVal) shimmerVal.textContent = bubble.shimmerSpeed.toFixed(1) + "x";
         }
     }
 
@@ -1009,6 +1045,9 @@ class VJController {
 
         var magSel = document.getElementById("ferro-magnet-mode");
         if (magSel && p.magnetMode) magSel.value = p.magnetMode;
+
+        var qualSel = document.getElementById("ferro-quality-select");
+        if (qualSel && ferroScene.qualityMode) qualSel.value = ferroScene.qualityMode;
 
         this._ferroSliderMap().forEach((item) => {
             var slider = document.getElementById(item.id);
@@ -1393,7 +1432,10 @@ class VJController {
                     if (!bubble) return;
                     var bObj = {
                         paletteIdx: bubble.paletteIdx,
-                        danceSpeed: bubble.danceSpeed
+                        numObstacles: bubble.numObstacles,
+                        flowDirection: bubble.flowDirection,
+                        flowSpeed: bubble.flowSpeed,
+                        shimmerSpeed: bubble.shimmerSpeed
                     };
                     codeStr = "// Soap Bubble Surface Configuration:\nthis.bubbleConfig = " + JSON.stringify(bObj, null, 4) + ";";
                     toastText = "Copied Bubble configuration to clipboard!";
@@ -1409,8 +1451,11 @@ class VJController {
                 } else if (this.activeSceneIdx === 5) {
                     var ferroScene = this.scenes[5];
                     if (!ferroScene) return;
-                    var jsonStr = JSON.stringify(ferroScene.params, null, 4);
-                    codeStr = "// Ferrofluid Physics Parameters:\nthis.params = " + jsonStr + ";";
+                    var fObj = {
+                        params: ferroScene.params,
+                        qualityMode: ferroScene.qualityMode
+                    };
+                    codeStr = "// Ferrofluid Physics Parameters:\nthis.ferroConfig = " + JSON.stringify(fObj, null, 4) + ";";
                     toastText = "Copied ferrofluid physics parameters to clipboard!";
                 } else {
                     var dancerScene = this.scenes[4];
@@ -1458,7 +1503,10 @@ class VJController {
                 } else if (this.activeSceneIdx === 2) {
                     var bubble = this.scenes[2];
                     if (bubble) {
-                        bubble.danceSpeed = 0.16;
+                        bubble.setNumObstacles(2);
+                        bubble.setFlowDirection(1);
+                        bubble.setFlowSpeed(1.0);
+                        bubble.setShimmerSpeed(1.0);
                         this.syncBubblesUI();
                     }
                 } else if (this.activeSceneIdx === 3) {
@@ -1470,6 +1518,7 @@ class VJController {
                 } else if (this.activeSceneIdx === 5) {
                     var ferroScene = this.scenes[5];
                     if (ferroScene) {
+                        if (ferroScene.setQuality) ferroScene.setQuality("auto");
                         if (ferroScene.reseed) ferroScene.reseed("labyrinth", true);
                         if (ferroScene.resetCamera) ferroScene.resetCamera();
                         this.syncFerrofluidUI();
@@ -1709,14 +1758,47 @@ class VJController {
             });
         }
 
+        var bubbleObsSel = document.getElementById("bubble-obstacles-select");
+        if (bubbleObsSel) {
+            bubbleObsSel.addEventListener("change", (e) => {
+                var bubble = this.scenes[2];
+                if (bubble && bubble.setNumObstacles) {
+                    bubble.setNumObstacles(e.target.value);
+                    this.syncBubblesUI();
+                }
+            });
+        }
+
+        var bubbleDirSel = document.getElementById("bubble-direction-select");
+        if (bubbleDirSel) {
+            bubbleDirSel.addEventListener("change", (e) => {
+                var bubble = this.scenes[2];
+                if (bubble && bubble.setFlowDirection) {
+                    bubble.setFlowDirection(e.target.value);
+                    this.syncBubblesUI();
+                }
+            });
+        }
+
         var bubbleSpeed = document.getElementById("slider-bubble-speed");
         if (bubbleSpeed) {
             bubbleSpeed.addEventListener("input", (e) => {
                 var val = parseFloat(e.target.value);
                 var valEl = document.getElementById("val-bubble-speed");
-                if (valEl) valEl.textContent = val.toFixed(2);
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
                 var bubble = this.scenes[2];
-                if (bubble) bubble.danceSpeed = val;
+                if (bubble && bubble.setFlowSpeed) bubble.setFlowSpeed(val);
+            });
+        }
+
+        var bubbleShimmer = document.getElementById("slider-bubble-shimmer");
+        if (bubbleShimmer) {
+            bubbleShimmer.addEventListener("input", (e) => {
+                var val = parseFloat(e.target.value);
+                var valEl = document.getElementById("val-bubble-shimmer");
+                if (valEl) valEl.textContent = val.toFixed(1) + "x";
+                var bubble = this.scenes[2];
+                if (bubble && bubble.setShimmerSpeed) bubble.setShimmerSpeed(val);
             });
         }
 
@@ -1724,7 +1806,10 @@ class VJController {
         if (btnBubbleAgitate) {
             btnBubbleAgitate.addEventListener("click", () => {
                 var bubble = this.scenes[2];
-                if (bubble && bubble.agitateCluster) bubble.agitateCluster();
+                if (bubble && bubble.agitateCluster) {
+                    bubble.agitateCluster();
+                    this.syncBubblesUI();
+                }
             });
         }
 
@@ -1743,7 +1828,10 @@ class VJController {
         if (btnBubbleInvert) {
             btnBubbleInvert.addEventListener("click", () => {
                 var bubble = this.scenes[2];
-                if (bubble) bubble.flowDirection *= -1;
+                if (bubble && bubble.invertFlow) {
+                    bubble.invertFlow();
+                    this.syncBubblesUI();
+                }
             });
         }
 
@@ -1751,8 +1839,8 @@ class VJController {
         if (btnBubbleNextPal) {
             btnBubbleNextPal.addEventListener("click", () => {
                 var bubble = this.scenes[2];
-                if (bubble && bubble.palettes) {
-                    bubble.paletteIdx = (bubble.paletteIdx + 1) % bubble.palettes.length;
+                if (bubble && bubble.cyclePalette) {
+                    bubble.cyclePalette();
                     this.syncBubblesUI();
                 }
             });
@@ -1846,6 +1934,17 @@ class VJController {
             ferroMagnetSel.addEventListener("change", (e) => {
                 var ferro = this.scenes[5];
                 if (ferro && ferro.setMagnetMode) ferro.setMagnetMode(e.target.value);
+            });
+        }
+
+        var ferroQualitySel = document.getElementById("ferro-quality-select");
+        if (ferroQualitySel) {
+            ferroQualitySel.addEventListener("change", (e) => {
+                var ferro = this.scenes[5];
+                if (ferro && ferro.setQuality) {
+                    ferro.setQuality(e.target.value);
+                    this.syncFerrofluidUI();
+                }
             });
         }
 
@@ -2233,6 +2332,14 @@ class VJController {
             if (this.autoCycleEnabled && !this.isCrossfading) {
                 this.timeInCurrentScene += dt;
                 if (this.timeInCurrentScene >= this.sceneDuration) this.nextScene();
+            }
+
+            // Keep P-Studio drawer synchronized with current scene whenever drawer is open
+            var drawer = document.getElementById("proportions-drawer");
+            if (drawer && !drawer.classList.contains("closed")) {
+                if (this._lastOpenPaneIdx !== this.activeSceneIdx) {
+                    this.showStudioPane(this.activeSceneIdx);
+                }
             }
 
             // Autonomous mountain cycling:

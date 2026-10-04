@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4029</title>
+    <title>LiteStep VJ vers. 4030</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,7 +45,7 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4029</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4030</span></h1>
                     <div class="hud-scene-status">
                         <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
@@ -370,15 +370,33 @@
                                 </select>
                             </div>
                         </div>
+                        <div class="dropdown-row" style="margin-top: 8px;">
+                            <div class="dropdown-item">
+                                <label class="section-label" for="bubble-obstacles-select">Deflection Obstacles</label>
+                                <select id="bubble-obstacles-select" class="drawer-dropdown">
+                                    <option value="0">0: Open Flow (None)</option>
+                                    <option value="1">1: Center Deflector</option>
+                                    <option value="2" selected>2: Twin Slalom Pegs</option>
+                                    <option value="3">3: Triangle Diverters</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="bubble-direction-select">Flow Direction</label>
+                                <select id="bubble-direction-select" class="drawer-dropdown">
+                                    <option value="1" selected>Top to Bottom ↓</option>
+                                    <option value="-1">Bottom to Top ↑</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="prop-group">
-                        <div class="group-header">Foam Cluster Dynamics</div>
+                        <div class="group-header">Looping Stream &amp; Foam Dynamics</div>
 
-                        <div class="prop-row highlight-row" title="Liquid style choreography undulating flow speed">
+                        <div class="prop-row highlight-row" title="Looping vertical fluid flow speed">
                             <span class="prop-label">🌊 Flow Speed</span>
-                            <input type="range" class="prop-slider" id="slider-bubble-speed" min="0.04" max="0.60" step="0.02" value="0.16">
-                            <span class="prop-val" id="val-bubble-speed">0.16</span>
+                            <input type="range" class="prop-slider" id="slider-bubble-speed" min="0.2" max="3.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-bubble-speed">1.0x</span>
                         </div>
 
                         <div class="prop-row" title="Film interference phase shimmer speed">
@@ -973,6 +991,15 @@
                             <span class="prop-label" title="Dye concentration (Beer-Lambert absorption): higher = deeper, more saturated ink">Ink Density</span>
                             <input type="range" class="ferro-slider" id="slider-ferro-density" min="0.30" max="3.00" step="0.05" value="1.20">
                             <span class="prop-val" id="val-ferro-density">1.20</span>
+                        </div>
+                        <div class="prop-row">
+                            <span class="prop-label" title="Render resolution quality: Auto scales dynamically with zoom for 60 FPS performance and tack-sharp macro details">Resolution</span>
+                            <select id="ferro-quality-select" class="drawer-dropdown" style="flex: 1; margin-left: 8px;">
+                                <option value="auto" selected>Auto (Zoom-Adaptive)</option>
+                                <option value="1x">1x (Standard / 60 FPS)</option>
+                                <option value="1.5x">1.5x (High DPR)</option>
+                                <option value="2x">2x (Ultra Retina)</option>
+                            </select>
                         </div>
                         <div class="prop-row">
                             <span class="prop-label" title="Camera macro magnification (scroll wheel, pinch, or + −)">Camera Zoom (Macro)</span>

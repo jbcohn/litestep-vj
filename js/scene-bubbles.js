@@ -140,22 +140,20 @@ class BubbleScene {
         this.clusterCenter = { x: 0, y: 0 };
         this.driftAngle = 0;
 
-        // Liquid Style Dancer Choreography:
-        // Slow, hypnotic, undulating flow with figure-8 weaving, arm-wave ripples, and crisp beat pops
-        this.dancePhase = 0.0;
-        this.danceSpeed = 0.16;       // Halved base speed (graceful, viscous, deliberate)
-        this.flowDirection = 1;       // Invertible flow direction
+        // Looping Vertical Stream & Foam Dynamics
+        this.flowDirection = 1;       // 1: Top to Bottom (down), -1: Bottom to Top (up)
+        this.flowSpeed = 1.0;         // Multiplier 0.2x to 3.0x
+        this.shimmerSpeed = 1.0;      // Film interference shimmer speed
+
+        // 0 to 3 Interactive Deflection Obstacles
+        this.numObstacles = 2;        // Default: 2 staggered slalom pegs
+        this.obstacles = [];
 
         // Liquid Beat Hit & Pop state
         this.beatHit = 0.0;
-
-        // ---- 3 Attraction Trough Columns ----
-        // Left, Center, and Right undulating trough columns across the canvas
-        this.troughSwayX = 0;
-        this.troughTargetSway = 0;
-        this.troughSide = -1;      // -1 for left sway, +1 for right sway
-        this.troughBeatCount = 0;
-        this.TROUGH_BEATS = 2;     // 2 beats per lateral sway cycle
+        this.dancePhase = 0.0;
+        this.swayPhase = 0.0;
+        this.ripples = [];
 
         // Thin-film interference phase driven by audio
         this.filmPhase = 0.0;
@@ -201,49 +199,104 @@ class BubbleScene {
         this.canvas = canvas;
         this.ctx = ctx;
         this.buildCluster();
-        this.troughSwayX = 0;
-        this.troughTargetSway = 0;
         this.isInitialized = true;
+    }
+
+    resize(width, height) {
+        this._updateObstaclesLayout(width, height);
+    }
+
+    _updateObstaclesLayout(w, h) {
+        w = w || (this.canvas ? this.canvas.width : window.innerWidth);
+        h = h || (this.canvas ? this.canvas.height : window.innerHeight);
+
+        var prevPulses = (this.obstacles || []).map(o => o.pulse || 0);
+
+        if (this.numObstacles === 0) {
+            this.obstacles = [];
+        } else if (this.numObstacles === 1) {
+            this.obstacles = [
+                {
+                    x: w * 0.5,
+                    y: h * 0.5,
+                    r: Math.max(38, Math.min(w, h) * 0.08 + 25),
+                    pulse: prevPulses[0] || 0
+                }
+            ];
+        } else if (this.numObstacles === 2) {
+            var rPeg = Math.max(32, Math.min(w, h) * 0.065 + 20);
+            this.obstacles = [
+                {
+                    x: w * 0.36,
+                    y: h * 0.38,
+                    r: rPeg,
+                    pulse: prevPulses[0] || 0
+                },
+                {
+                    x: w * 0.64,
+                    y: h * 0.62,
+                    r: rPeg,
+                    pulse: prevPulses[1] || 0
+                }
+            ];
+        } else {
+            var rTri = Math.max(28, Math.min(w, h) * 0.055 + 18);
+            this.obstacles = [
+                {
+                    x: w * 0.50,
+                    y: h * 0.30,
+                    r: rTri,
+                    pulse: prevPulses[0] || 0
+                },
+                {
+                    x: w * 0.30,
+                    y: h * 0.68,
+                    r: rTri,
+                    pulse: prevPulses[1] || 0
+                },
+                {
+                    x: w * 0.70,
+                    y: h * 0.68,
+                    r: rTri,
+                    pulse: prevPulses[2] || 0
+                }
+            ];
+        }
     }
 
     buildCluster() {
         var w = this.canvas ? this.canvas.width : window.innerWidth;
         var h = this.canvas ? this.canvas.height : window.innerHeight;
         this.clusterCenter = { x: w / 2, y: h / 2 };
+        this._updateObstaclesLayout(w, h);
 
         this.bubbles = [];
-        // Distribution matching reference image (media_1789442083526.jpg):
-        // 4 Macro chambers, 16 Medium bubbles, 26 Micro interstitial pearls
         var specs = [
-            // 4 Macro
-            { count: 4,  minR: 70, maxR: 110 },
-            // 16 Medium
-            { count: 16, minR: 28, maxR: 58  },
-            // 26 Micro
+            { count: 4,  minR: 65, maxR: 105 },
+            { count: 16, minR: 26, maxR: 54  },
             { count: 26, minR: 7,  maxR: 20  }
         ];
 
         var idx = 0;
-        var colOffsets = [-280, 0, 280];
+        var baseVy = this.flowDirection * 65.0 * this.flowSpeed;
+
         for (var s = 0; s < specs.length; s++) {
             for (var c = 0; c < specs[s].count; c++) {
                 var r = specs[s].minR + Math.random() * (specs[s].maxR - specs[s].minR);
-                var colIdx = idx % 3;
-                var colBaseX = this.clusterCenter.x + colOffsets[colIdx];
-                var colBaseY = this.clusterCenter.y + (Math.random() - 0.5) * 280;
-                var scatterX = (Math.random() - 0.5) * 50;
+                var x = 30 + Math.random() * (w - 60);
+                var y = Math.random() * h;
                 this.bubbles.push({
                     id: idx++,
-                    x: colBaseX + scatterX,
-                    y: colBaseY,
+                    x: x,
+                    y: y,
                     vx: (Math.random() - 0.5) * 8,
-                    vy: (Math.random() - 0.5) * 8,
+                    vy: baseVy * (0.8 + Math.random() * 0.4),
                     r: r,
                     baseR: r,
                     renderR: r,
                     flex: 0.0,
                     flexVel: 0.0,
-                    mass: 14.0 + r, // Balanced mass so large and small bubbles interact gracefully
+                    mass: 14.0 + r,
                     angle: Math.random() * Math.PI * 2,
                     rotSpeed: (Math.random() - 0.5) * 0.3
                 });
@@ -327,44 +380,33 @@ class BubbleScene {
         if (!this.isInitialized) return;
         this.time += dt;
 
-        // Mids cycle the iridescent oil-slick phase (silky rainbow shimmer across bubbles)
-        this.filmPhase += (0.04 + audio.mids * 0.18) * dt;
+        // Film phase driven by shimmer speed and audio
+        this.filmPhase += (0.04 + (audio.mids || 0) * 0.18) * this.shimmerSpeed * dt;
 
-        var w = this.canvas.width, h = this.canvas.height;
-        // Gentle cluster drift (slow, barely perceptible wander)
-        this.driftAngle += 0.05 * dt;
-        var driftX = Math.sin(this.driftAngle) * 28;
-        var driftY = Math.cos(this.driftAngle * 0.6) * 18;
-        var targetCx = w / 2 + driftX;
-        var targetCy = h / 2 + driftY;
-        this.clusterCenter.x = targetCx;
-        this.clusterCenter.y = targetCy;
+        var w = this.canvas ? this.canvas.width : window.innerWidth;
+        var h = this.canvas ? this.canvas.height : window.innerHeight;
 
-        // Reset contact pair list each frame — MUST be here to prevent accumulation splat bug
+        // Reset contact pair list each frame
         this.contactPairs = [];
 
-        // =========================================================================
-        // UNIFIED UNDULATING CURRENT FIELD
-        // Continuous harmonic fluid sway that keeps all bubbles moving gracefully
-        // back and forth across the screen at all times without freezing.
-        // =========================================================================
+        // Continuous rhythmic fluid sway & dance phases
+        this.dancePhase = (this.dancePhase || 0) + (0.20 + (audio.mids || 0) * 0.15) * dt;
+        this.swayPhase  = (this.swayPhase || 0)  + (0.85 + (audio.bass || 0) * 0.35) * dt;
 
-        // Advance continuous dance and sway phases
-        this.dancePhase = (this.dancePhase || 0) + (this.danceSpeed * 0.70 + (audio.mids || 0) * 0.15) * dt;
-        this.swayPhase  = (this.swayPhase || 0)  + (0.95 + (audio.mids || 0) * 0.35 + (audio.bass || 0) * 0.25) * dt;
-
-        // On beat: transient pulse energy
         if (audio.isBeat) {
             this.beatHit = 1.0;
         }
         this.beatHit = Math.max(0, this.beatHit - dt * 2.2);
 
-        // 3 Trough Columns System:
-        // Left, Center, and Right columns across the width, swaying together laterally in continuous harmonic wave
-        var colSpacing = Math.min(w * 0.28, 290);
-        var swayAmp = Math.min(w * 0.12, 115);
-        // Continuous harmonic sway back and forth (guaranteed non-stop fluid motion):
-        this.troughSwayX = Math.sin(this.swayPhase) * swayAmp;
+        // Update obstacle pulses
+        if (this.obstacles && this.obstacles.length > 0) {
+            for (var o = 0; o < this.obstacles.length; o++) {
+                this.obstacles[o].pulse = Math.max(0, (this.obstacles[o].pulse || 0) - dt * 2.5);
+            }
+        }
+
+        // Target looping vertical speed (continuous waterfall or rising effervescence)
+        var targetVy = this.flowDirection * 75.0 * this.flowSpeed;
 
         for (var i = 0; i < this.bubbles.length; i++) {
             var b1 = this.bubbles[i];
@@ -373,56 +415,61 @@ class BubbleScene {
             var springK = 20.0, dampK = 9.0;
             b1.flexVel += (-b1.flex * springK - b1.flexVel * dampK) * dt;
             b1.flex    += b1.flexVel * dt;
-            b1.flex     = Math.max(-0.12, Math.min(0.24, b1.flex));
+            b1.flex     = Math.max(-0.14, Math.min(0.26, b1.flex));
             b1.renderR  = Math.max(2.0, b1.r * (1.0 + b1.flex));
 
-            // 1. ATTRACTION TO 3 TROUGH COLUMNS (Left = 0, Center = 1, Right = 2)
-            var yOffset = b1.y - targetCy;
-            var bestColX = 0;
-            var minColDist = 1e9;
-            var assignedCol = 1;
+            // 1. Continuous vertical flow acceleration
+            b1.vy += (targetVy - b1.vy) * 2.2 * dt;
 
-            for (var k = 0; k < 3; k++) {
-                var cBaseX = targetCx + (k - 1) * colSpacing + this.troughSwayX;
-                var cCurve = Math.sin(yOffset * 0.0055 + this.dancePhase + k * 1.3) * 40.0;
-                var cX = cBaseX + cCurve;
-                var dCol = Math.abs(cX - b1.x);
-                if (dCol < minColDist) {
-                    minColDist = dCol;
-                    bestColX = cX;
-                    assignedCol = k;
+            // 2. Harmonic lateral fluid sway current
+            var fluidSway = Math.sin(this.swayPhase + b1.y * 0.0035 + (b1.id % 5) * 0.4) * (24.0 + (audio.bass || 0) * 18.0);
+            b1.vx += fluidSway * dt;
+
+            // Beat flex pulse
+            if (audio.isBeat) {
+                b1.flexVel += 0.14 + (audio.bass || 0) * 0.12;
+            }
+
+            // 3. Obstacle Collision & Streamline Deflection Physics
+            if (this.obstacles && this.obstacles.length > 0) {
+                for (var oi = 0; oi < this.obstacles.length; oi++) {
+                    var obs = this.obstacles[oi];
+                    var dxObs = b1.x - obs.x;
+                    var dyObs = b1.y - obs.y;
+                    var dSqObs = dxObs * dxObs + dyObs * dyObs;
+                    var rSum = b1.renderR + obs.r;
+                    var rDef = rSum * 1.65;
+
+                    if (dSqObs < rDef * rDef && dSqObs > 0.01) {
+                        var dObs = Math.sqrt(dSqObs);
+                        var nx = dxObs / dObs, ny = dyObs / dObs;
+
+                        // Tangential streamline force (diverts bubbles gracefully around flanks)
+                        var side = (dxObs >= 0) ? 1.0 : -1.0;
+                        var tx = -ny * side, ty = nx * side;
+                        var cushion = (rDef - dObs) / (rDef - rSum);
+                        var defForce = Math.min(1.0, cushion) * 92.0 * this.flowSpeed;
+                        b1.vx += tx * defForce * dt;
+                        b1.vy += ty * defForce * dt * 0.45;
+
+                        // Hard elastic contact
+                        if (dObs < rSum) {
+                            var overlap = rSum - dObs;
+                            var bounce = (130.0 + overlap * 20.0);
+                            b1.vx += (nx * bounce) / b1.mass;
+                            b1.vy += (ny * bounce) / b1.mass;
+                            b1.flexVel += 0.28 * (overlap / b1.r + 0.15);
+                            obs.pulse = Math.min(1.0, (obs.pulse || 0) + 0.35);
+
+                            if (Math.random() < 0.25 && (audio.isBeat || overlap > 4.0)) {
+                                this.spawnDroplets(obs.x + nx * obs.r, obs.y + ny * obs.r, 4);
+                            }
+                        }
+                    }
                 }
             }
 
-            var dxTrough = bestColX - b1.x;
-            b1.vx += dxTrough * 2.6 * dt;
-
-            // Direct continuous fluid sway current
-            var fluidSway = Math.cos(this.swayPhase + yOffset * 0.0035 + (assignedCol * 0.6)) * (32.0 + (audio.bass || 0) * 22.0);
-            b1.vx += fluidSway * dt;
-
-            // 2. PHASE-SHIFTED VERTICAL UNDULATION
-            // Center column bobs counter to Left and Right columns for dynamic, lively dancing!
-            var colPhase = assignedCol === 1 ? Math.PI : 0.0;
-            var vertWave = Math.sin(this.dancePhase * 1.6 + colPhase + (b1.x - targetCx) * 0.004) * (36.0 + (audio.bass || 0) * 26.0);
-            b1.vy += vertWave * dt;
-
-            // Gentle beat flex pulse
-            if (audio.isBeat) {
-                b1.flexVel += 0.16 + (audio.bass || 0) * 0.14;
-            }
-
-            // Soft elliptical leash keeping all 3 columns comfortably in view with wider horizontal margin
-            var normX = (targetCx - b1.x) / 470;
-            var normY = (targetCy - b1.y) / 290;
-            var leashDist = Math.sqrt(normX * normX + normY * normY);
-            if (leashDist > 1.0) {
-                var leashForce = 1.4 * (leashDist - 1.0);
-                b1.vx += (normX / leashDist) * leashForce * 35;
-                b1.vy += (normY / leashDist) * leashForce * 35;
-            }
-
-            // 3. INVISIBLE OUTER RING REPULSION (Enhanced for bigger bubbles)
+            // 4. Inter-Bubble Outer Ring Repulsion & Plateau Chords
             for (var j = i + 1; j < this.bubbles.length; j++) {
                 var b2 = this.bubbles[j];
                 var dx = b2.x - b1.x, dy = b2.y - b1.y;
@@ -433,36 +480,30 @@ class BubbleScene {
                 var maxR = Math.max(r1, r2);
                 var physicalRadius = (r1 + r2) * 0.95;
 
-                // Bigger bubbles command a wider, more expansive repulsion perimeter
-                var bigSizeRatio = Math.max(0, (maxR - 22) / 40); // 0 for micro, up to 1.8 for macro
-                var ringMultiplier = 1.85 + bigSizeRatio * 0.40;  // Up to ~2.5x radius for macro bubbles
+                var bigSizeRatio = Math.max(0, (maxR - 22) / 40);
+                var ringMultiplier = 1.85 + bigSizeRatio * 0.40;
                 var outerRingRadius = physicalRadius * ringMultiplier;
-
-                // Repulsion force multiplier scaled up significantly for larger bubbles
                 var forceMult = 1.0 + bigSizeRatio * 1.4;
 
                 if (distSq < outerRingRadius * outerRingRadius && distSq > 0.01) {
                     var dist = Math.sqrt(distSq);
-                    var nx = dx / dist, ny = dy / dist;
+                    var nx2 = dx / dist, ny2 = dy / dist;
 
                     if (dist >= physicalRadius) {
-                        // In outer ring zone: gentle quadratic cushion pushing neighbors apart
-                        var cushion = (outerRingRadius - dist) / (outerRingRadius - physicalRadius);
-                        var ringPush = cushion * cushion * 44.0 * forceMult;
-                        b1.vx -= (nx * ringPush) / b1.mass;
-                        b1.vy -= (ny * ringPush) / b1.mass;
-                        b2.vx += (nx * ringPush) / b2.mass;
-                        b2.vy += (ny * ringPush) / b2.mass;
+                        var cushion2 = (outerRingRadius - dist) / (outerRingRadius - physicalRadius);
+                        var ringPush = cushion2 * cushion2 * 44.0 * forceMult;
+                        b1.vx -= (nx2 * ringPush) / b1.mass;
+                        b1.vy -= (ny2 * ringPush) / b1.mass;
+                        b2.vx += (nx2 * ringPush) / b2.mass;
+                        b2.vy += (ny2 * ringPush) / b2.mass;
                     } else {
-                        // In physical contact zone: firm repulsion to maintain bubble integrity
-                        var overlap = physicalRadius - dist;
-                        var firmPush = (44.0 + overlap * 5.0) * forceMult;
-                        b1.vx -= (nx * firmPush) / b1.mass;
-                        b1.vy -= (ny * firmPush) / b1.mass;
-                        b2.vx += (nx * firmPush) / b2.mass;
-                        b2.vy += (ny * firmPush) / b2.mass;
+                        var overlap2 = physicalRadius - dist;
+                        var firmPush = (44.0 + overlap2 * 5.0) * forceMult;
+                        b1.vx -= (nx2 * firmPush) / b1.mass;
+                        b1.vy -= (ny2 * firmPush) / b1.mass;
+                        b2.vx += (nx2 * firmPush) / b2.mass;
+                        b2.vy += (ny2 * firmPush) / b2.mass;
 
-                        // Record contact pair for Plateau borders/chords
                         this.contactPairs.push({
                             i: i, j: j,
                             p1: { x: b1.x, y: b1.y, r: r1 },
@@ -477,21 +518,41 @@ class BubbleScene {
             b1.angle    += b1.rotSpeed * dt;
             b1.rotSpeed *= 0.98;
 
-            // Liquid motion integration
+            // Fluid motion integration
             b1.x  += b1.vx * dt * 26;
             b1.y  += b1.vy * dt * 26;
             b1.vx *= 0.935;
             b1.vy *= 0.935;
 
-            // Soft boundary guard
-            var margin = (b1.renderR || b1.r) + 20;
-            if (b1.x < margin)     { b1.x = margin;     b1.vx *= -0.3; }
-            if (b1.x > w - margin) { b1.x = w - margin; b1.vx *= -0.3; }
-            if (b1.y < margin)     { b1.y = margin;      b1.vy *= -0.3; }
-            if (b1.y > h - margin) { b1.y = h - margin;  b1.vy *= -0.3; }
+            // Seamless Looping Boundary Wrapping across vertical flow direction
+            var br = b1.renderR || b1.r;
+            if (this.flowDirection > 0) {
+                // Flowing DOWN: wrap from bottom to top
+                if (b1.y - br > h + 15) {
+                    b1.y = -br - Math.random() * 45;
+                    b1.x = 30 + Math.random() * (w - 60);
+                    b1.vy = targetVy * (0.8 + Math.random() * 0.4);
+                    b1.vx = (Math.random() - 0.5) * 12;
+                }
+            } else {
+                // Flowing UP: wrap from top to bottom
+                if (b1.y + br < -15) {
+                    b1.y = h + br + Math.random() * 45;
+                    b1.x = 30 + Math.random() * (w - 60);
+                    b1.vy = targetVy * (0.8 + Math.random() * 0.4);
+                    b1.vx = (Math.random() - 0.5) * 12;
+                }
+            }
+
+            // Horizontal wrapping
+            if (b1.x < -br) {
+                b1.x = w + br;
+            } else if (b1.x > w + br) {
+                b1.x = -br;
+            }
         }
 
-        // Popping Droplet Particles (only spawn on strong beats now)
+        // Popping Droplet Particles
         if (audio.isBeat && audio.beatConfidence > 0.80 && Math.random() < 0.25) {
             var anyBubble = this.bubbles[Math.floor(Math.random() * this.bubbles.length)];
             if (anyBubble) this.spawnDroplets(anyBubble.x, anyBubble.y, 4);
@@ -514,9 +575,65 @@ class BubbleScene {
         ctx.save();
         ctx.globalAlpha = alpha;
 
-        // Pure pitch-black background matching reference image
+        // Pure pitch-black background
         ctx.fillStyle = pal.bg;
         ctx.fillRect(0, 0, width, height);
+
+        // 0. Render Deflection Obstacles (Sleek Obsidian/Quartz Luminous Glass Spheres)
+        if (this.obstacles && this.obstacles.length > 0) {
+            for (var o = 0; o < this.obstacles.length; o++) {
+                var obs = this.obstacles[o];
+                var pulse = obs.pulse || 0;
+                var or = obs.r;
+
+                // Outer caustic rim glow reacting to bubble impacts and beat
+                var glowR = or * (1.18 + pulse * 0.22);
+                var glowGrad = ctx.createRadialGradient(obs.x, obs.y, or * 0.8, obs.x, obs.y, glowR);
+                var rimAlpha = 0.25 + pulse * 0.55 + ((audio && audio.bass) ? audio.bass : 0) * 0.2;
+                glowGrad.addColorStop(0.0, "rgba(220, 238, 255, 0.0)");
+                glowGrad.addColorStop(0.6, `rgba(180, 225, 255, ${rimAlpha * 0.4})`);
+                glowGrad.addColorStop(0.85, `rgba(140, 200, 255, ${rimAlpha * 0.7})`);
+                glowGrad.addColorStop(1.0, "rgba(200, 235, 255, 0.0)");
+                ctx.fillStyle = glowGrad;
+                ctx.beginPath();
+                ctx.arc(obs.x, obs.y, glowR, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Dark obsidian sphere body
+                var bodyGrad = ctx.createRadialGradient(
+                    obs.x - or * 0.35, obs.y - or * 0.35, or * 0.1,
+                    obs.x, obs.y, or
+                );
+                bodyGrad.addColorStop(0.0, "#1e293b");
+                bodyGrad.addColorStop(0.5, "#0f172a");
+                bodyGrad.addColorStop(0.9, "#050811");
+                bodyGrad.addColorStop(1.0, "#020408");
+                ctx.fillStyle = bodyGrad;
+                ctx.beginPath();
+                ctx.arc(obs.x, obs.y, or, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Refractive inner ring
+                ctx.strokeStyle = `rgba(220, 240, 255, ${0.45 + pulse * 0.35})`;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(obs.x, obs.y, Math.max(1, or - 2.5), 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Upper-left high-gloss specular highlight
+                var specGrad = ctx.createRadialGradient(
+                    obs.x - or * 0.38, obs.y - or * 0.38, 0,
+                    obs.x - or * 0.38, obs.y - or * 0.38, or * 0.28
+                );
+                specGrad.addColorStop(0.0, "rgba(255, 255, 255, 0.85)");
+                specGrad.addColorStop(0.4, "rgba(230, 245, 255, 0.55)");
+                specGrad.addColorStop(1.0, "rgba(200, 230, 255, 0.0)");
+                ctx.fillStyle = specGrad;
+                ctx.beginPath();
+                ctx.arc(obs.x - or * 0.38, obs.y - or * 0.38, or * 0.28, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
 
         // Sort bubbles largest first so smaller interstitial pearls layer crisply on top
         var sorted = this.bubbles.slice().sort((a, b) => (b.renderR || b.r) - (a.renderR || a.r));
@@ -643,6 +760,31 @@ class BubbleScene {
         }
 
         ctx.restore();
+    }
+
+    setNumObstacles(val) {
+        this.numObstacles = Math.max(0, Math.min(3, parseInt(val, 10) || 0));
+        this._updateObstaclesLayout();
+    }
+
+    setFlowDirection(dir) {
+        this.flowDirection = (parseInt(dir, 10) >= 0) ? 1 : -1;
+    }
+
+    invertFlow() {
+        this.flowDirection *= -1;
+    }
+
+    setFlowSpeed(val) {
+        this.flowSpeed = Math.max(0.1, Math.min(3.0, parseFloat(val) || 1.0));
+    }
+
+    setShimmerSpeed(val) {
+        this.shimmerSpeed = Math.max(0.1, Math.min(3.0, parseFloat(val) || 1.0));
+    }
+
+    cyclePalette() {
+        this.paletteIdx = (this.paletteIdx + 1) % this.palettes.length;
     }
 }
 

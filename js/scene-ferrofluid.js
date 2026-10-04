@@ -234,7 +234,9 @@ class FerrofluidScene {
         this.passScene.add(this.quad);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "high-performance" });
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.qualityMode = "auto";
+        this.currentPixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+        this.renderer.setPixelRatio(this.currentPixelRatio);
         this.renderer.setSize(width, height);
         this.renderer.autoClear = true;
 
@@ -775,6 +777,43 @@ class FerrofluidScene {
         this.mat.post.uniforms.u_dof.value = this.params.dof;
         this.mat.post.uniforms.u_time.value = this.time;
         this.mat.post.uniforms.u_focusDist.value = this.zoom;
+
+        if (this.qualityMode === "auto") {
+            this._updateAutoQuality();
+        }
+    }
+
+    _applyPixelRatio(ratio) {
+        this.currentPixelRatio = ratio;
+        if (!this.renderer) return;
+        this.renderer.setPixelRatio(ratio);
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this._resizeColorTarget();
+    }
+
+    _updateAutoQuality() {
+        var baseDpr = window.devicePixelRatio || 1;
+        // Smoothly scale pixel ratio based on zoom:
+        // When zoomed out (mag <= 1.5): 1.25x (blazing fast, smooth 60 FPS)
+        // When zoomed in (mag >= 3.0): up to 2.0x (ultra crisp macro details)
+        var factor = Math.max(0, Math.min(1.0, (this.magnification - 1.2) / 3.0));
+        var targetRatio = Math.min(baseDpr, 1.25 + factor * 0.75);
+        if (Math.abs((this.currentPixelRatio || 1.5) - targetRatio) > 0.15) {
+            this._applyPixelRatio(targetRatio);
+        }
+    }
+
+    setQuality(mode) {
+        this.qualityMode = mode || "auto";
+        if (this.qualityMode === "1x") {
+            this._applyPixelRatio(1.0);
+        } else if (this.qualityMode === "1.5x") {
+            this._applyPixelRatio(1.5);
+        } else if (this.qualityMode === "2x") {
+            this._applyPixelRatio(2.0);
+        } else {
+            this._updateAutoQuality();
+        }
     }
 
     resize(width, height) {
@@ -1435,6 +1474,33 @@ const float WS = 0.208;
 const float TURNTABLE = 0.012;
 vec2 toUV(vec2 p) { return p * WS + 0.5; }
 
+// High-precision bicubic filtering to eliminate pixelation and faceting on macro zoom
+vec4 sampleBicubic(sampler2D tex, vec2 uv, vec2 res) {
+    vec2 px = 1.0 / res;
+    vec2 vc = uv * res - 0.5;
+    vec2 f = fract(vc);
+    vec2 i = floor(vc);
+
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+
+    vec2 w12 = w1 + w2;
+    vec2 tc12 = (i + 1.0 + w2 / w12) * px;
+    vec2 tc0 = (i - 0.5) * px;
+    vec2 tc3 = (i + 2.5) * px;
+
+    vec4 c0 = texture2D(tex, vec2(tc12.x, tc0.y));
+    vec4 c1 = texture2D(tex, vec2(tc0.x, tc12.y));
+    vec4 c2 = texture2D(tex, vec2(tc12.x, tc12.y));
+    vec4 c3 = texture2D(tex, vec2(tc3.x, tc12.y));
+    vec4 c4 = texture2D(tex, vec2(tc12.x, tc3.y));
+
+    return (c0 * w12.x * w0.y + c1 * w0.x * w12.y + c2 * w12.x * w12.y + c3 * w3.x * w12.y + c4 * w12.x * w3.y) /
+           ((w0.x + w12.x + w3.x) * (w0.y + w12.y + w3.y));
+}
+
 vec2 smoothUV(vec2 uv, vec2 res) {
     vec2 p = uv * res - 0.5;
     vec2 i = floor(p);
@@ -1449,13 +1515,14 @@ float heightAt(vec2 p) {
     float d = length(p);
     float rim = rimH(d);
     if (d > 2.22) return rim;
-    vec2 uv = smoothUV(toUV(p), vec2(768.0));
-    float fluidH = texture2D(u_height, uv).r;
+    vec2 uv = toUV(p);
+    float fluidH = sampleBicubic(u_height, uv, vec2(768.0)).r;
     return max(fluidH, rim);
 }
 
 vec3 normalAt(vec2 p) {
-    float e = 0.009;
+    // Dynamically scale finite difference step with camera distance for tack-sharp macro specular highlights
+    float e = clamp(0.0032 * (u_cam_dist / 3.8), 0.0012, 0.008);
     float hR = heightAt(p + vec2(e, 0.0));
     float hL = heightAt(p - vec2(e, 0.0));
     float hU = heightAt(p + vec2(0.0, e));
@@ -1538,8 +1605,8 @@ void main() {
     vec3 colRim = vec3(0.012) + env(R, C) * (0.04 + 0.96 * fres5) + u_ink_avg * 0.08;
 
     // 3. Fluid inside dish (ferrofluid & ink)
-    vec2 uvCoord = smoothUV(toUV(p.xz), vec2(768.0));
-    vec4 Hs = texture2D(u_height, uvCoord);
+    vec2 uvCoord = toUV(p.xz);
+    vec4 Hs = sampleBicubic(u_height, uvCoord, vec2(768.0));
     float ferroMask = smoothstep(-0.002, 0.002, Hs.a - Hs.b);
 
     // Ferrofluid: black dielectric mirror (oil carrier, magnetite absorbs all transmitted light)
@@ -1552,12 +1619,12 @@ void main() {
     float depth = max(Hs.b, 0.002);
     float cosT = max(-rt.y, 0.25);
     vec2 pb = p.xz + rt.xz / cosT * depth;
-    vec2 uvb = smoothUV(toUV(pb), vec2(512.0));
-    vec3 dye = texture2D(u_dye, uvb).rgb;
+    vec2 uvb = toUV(pb);
+    vec3 dye = sampleBicubic(u_dye, uvb, vec2(512.0)).rgb;
     vec3 logA = dye.r * log(max(u_ink1, vec3(0.003))) + dye.g * log(max(u_ink2, vec3(0.003))) + dye.b * log(max(u_ink3, vec3(0.003)));
     float path = depth * (1.0 / cosT + 1.0);
     vec3 trans = exp(logA * u_density * path / (2.0 * 0.32 * u_H));
-    float ferroUnder = texture2D(u_height, smoothUV(uvb, vec2(768.0))).g;
+    float ferroUnder = sampleBicubic(u_height, uvb, vec2(768.0)).g;
     float floorLight = 0.95 * (1.0 - 0.85 * ferroUnder);
     vec3 colI = vec3(floorLight) * trans * (1.0 - Fi) + env(R, C) * Fi;
 
