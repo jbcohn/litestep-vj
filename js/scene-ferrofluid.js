@@ -366,7 +366,7 @@ class FerrofluidScene {
 
         this.mat.ctrl = this._shader(FerrofluidScene.FS_CTRL, {
             u_prev: { value: null }, u_mean: { value: null }, u_V0: { value: 0.25 },
-            u_kp: { value: 4.0 }, u_ki: { value: 0.02 }, u_reset: { value: 1.0 }, u_init: { value: 0.5 }
+            u_kp: { value: 1.2 }, u_ki: { value: 0.015 }, u_reset: { value: 1.0 }, u_init: { value: 0.5 }
         });
 
         this.mat.spike = this._shader(FerrofluidScene.FS_SPIKE, {
@@ -594,7 +594,7 @@ class FerrofluidScene {
         var target = P.field * mult;
         this.fieldSmooth += (target - this.fieldSmooth) * (1 - Math.exp(-dt * rate));
 
-        this.fieldEff = this.fieldSmooth * rampS * (1.0 + 0.38 * bassDrive + 0.28 * this.kickPulse * react) + 0.25 * (this.agitation + this.midAgitate);
+        this.fieldEff = this.fieldSmooth * rampS * (1.0 + 0.38 * bassDrive + 0.28 * this.kickPulse * react);
         this.brep = Math.min(16.0, 0.85 * this.fieldEff * this.fieldEff);
 
         // Swift-Hohenberg spike drive: proportional to H - Hc + kick eruption + drop burst
@@ -678,7 +678,8 @@ class FerrofluidScene {
         var pu = M.phase.uniforms;
         pu.u_K.value = R.K.texture;
         pu.u_ctrl.value = R.ctrlA.texture;
-        pu.u_eps2.value = Math.max(0.55, P.tension);
+        var eps2 = Math.max(0.55, P.tension);
+        pu.u_eps2.value = eps2;
         pu.u_brep.value = this.brep;
         pu.u_pull.value = P.magnetPull * (0.4 + 0.6 * Math.min(1.5, this.fieldEff));
         pu.u_local.value = P.focus;
@@ -687,6 +688,11 @@ class FerrofluidScene {
         pu.u_time.value = this.time;
         pu.u_mouse_pos.value.copy(this.mouseUV);
         pu.u_mouse_action.value = this.mouseAction;
+
+        // Dynamic CFL timestep ensuring linear stability across all surface tensions and field strengths
+        var maxEig = 5.333 * eps2 + 2.0 + 0.25 * this.brep;
+        pu.u_dt.value = Math.min(0.20, 1.40 / maxEig);
+
         var S = Math.max(1, Math.min(12, Math.round(P.simSpeed)));
         for (var i = 0; i < S; i++) {
             pu.u_state.value = R.phaseA.texture;
@@ -885,8 +891,6 @@ class FerrofluidScene {
         if (this.params[key] === val) return;
         this.params[key] = val;
         if (key === "volume") this.volumeTarget = val;
-        // The labyrinth is metastable: a gentle shake lets it re-anneal to the new line scale
-        if (key === "tension" || key === "thickness" || key === "field") this.agitation = Math.max(this.agitation, 0.6);
     }
 
     setMagnetMode(mode) {
@@ -1196,12 +1200,10 @@ void main() {
 
     float g = clamp(1.0 - c * c, 0.0, 1.0) + 0.02;
     float drive = -u_brep * fieldLocal * K + lam + u_pull * P;
-    if (u_agitate > 0.001) {
-        drive += u_agitate * (vnoise(vUv * 38.0 + vec2(u_time * 3.1, -u_time * 2.3)) - 0.5) * 2.4;
-    }
 
     float rhs = u_eps2 * lap + c - c * c * c + g * drive;
-    float nc = clamp(c + u_dt * rhs, -1.0, 1.0);
+    float delta = clamp(u_dt * rhs, -0.35, 0.35);
+    float nc = clamp(c + delta, -1.0, 1.0);
 
     if (u_mouse_action > 0.5) {
         float dM = length(vUv - u_mouse_pos);
@@ -1347,9 +1349,6 @@ void main() {
     vec2 dm = vUv - u_magpos;
     float P = exp(-dot(dm, dm) / (u_magR * u_magR));
     v += u_magvel * P * 0.6;
-
-    vec2 cc = vUv - 0.5;
-    v += u_agitate * 0.003 * vec2(-cc.y, cc.x) * sin(u_time * 7.0 + length(cc) * 30.0) * 8.0;
 
     float Lv = length(v);
     if (Lv > 0.01) v *= 0.01 / Lv;
