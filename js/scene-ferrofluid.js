@@ -84,7 +84,7 @@ class FerrofluidScene {
             density: 1.2,         // Ink dye absorption density
             fluidHeight: 0.075,   // Relief height (world units)
             gloss: 1.0,           // Studio light intensity
-            dof: 0.6,             // Depth of field strength
+            dof: 0.9,             // Depth of field (higher = deeper focus, less blur)
             simSpeed: 6,          // Phase-field substeps per frame
             audioReact: 1.0,      // Audio → field coupling
             paletteIdx: 0
@@ -434,14 +434,15 @@ class FerrofluidScene {
     // ------------------------------------------------------------------
     // Seeding
     // ------------------------------------------------------------------
-    reseed(presetName, isInitial) {
+    reseed(presetName, isInitial, keepParams) {
         presetName = presetName || this.params.preset;
         var preset = this.presets[presetName] || this.presets.labyrinth;
         if (!this.presets[presetName]) presetName = "labyrinth";
         this.params.preset = presetName;
 
+        // keepParams: re-seed the fluid only, leave the user's slider values untouched
         var keys = ["field", "tension", "thickness", "volume", "spikeThreshold", "magnetPull", "fluidHeight"];
-        for (var k = 0; k < keys.length; k++) this.params[keys[k]] = preset[keys[k]];
+        if (!keepParams) for (var k = 0; k < keys.length; k++) this.params[keys[k]] = preset[keys[k]];
         this.volumeTarget = this.params.volume;
         this.rampDuration = preset.ramp || 3.0;
         this.ramp = 0.0;
@@ -774,7 +775,7 @@ class FerrofluidScene {
         u.u_gloss.value = this.params.gloss;
         u.u_highs.value = audio ? (audio.highs || 0) : 0;
         u.u_density.value = this.params.density;
-        this.mat.post.uniforms.u_dof.value = this.params.dof;
+        this.mat.post.uniforms.u_dof.value = Math.max(0.0, 1.5 - this.params.dof);   // slider = depth of field (higher = more in focus)
         this.mat.post.uniforms.u_time.value = this.time;
         this.mat.post.uniforms.u_focusDist.value = this.zoom;
 
@@ -881,8 +882,11 @@ class FerrofluidScene {
 
     setParam(key, val) {
         if (this.params[key] === undefined) return;
+        if (this.params[key] === val) return;
         this.params[key] = val;
         if (key === "volume") this.volumeTarget = val;
+        // The labyrinth is metastable: a gentle shake lets it re-anneal to the new line scale
+        if (key === "tension" || key === "thickness" || key === "field") this.agitation = Math.max(this.agitation, 0.6);
     }
 
     setMagnetMode(mode) {

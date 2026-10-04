@@ -2010,7 +2010,7 @@ class VJController {
             btnFerroReseed.addEventListener("click", () => {
                 var ferro = this.scenes[5];
                 if (ferro && ferro.reseed) {
-                    ferro.reseed(null, false);
+                    ferro.reseed(null, false, true);
                     this.syncFerrofluidUI();
                 }
                 btnFerroReseed.classList.add("pulse");
