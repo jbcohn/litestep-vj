@@ -811,6 +811,8 @@ class FerrofluidScene {
             this._applyPixelRatio(1.5);
         } else if (this.qualityMode === "2x") {
             this._applyPixelRatio(2.0);
+        } else if (this.qualityMode === "2.5x") {
+            this._applyPixelRatio(2.5);
         } else {
             this._updateAutoQuality();
         }
@@ -1474,38 +1476,12 @@ const float WS = 0.208;
 const float TURNTABLE = 0.012;
 vec2 toUV(vec2 p) { return p * WS + 0.5; }
 
-// High-precision bicubic filtering to eliminate pixelation and faceting on macro zoom
-vec4 sampleBicubic(sampler2D tex, vec2 uv, vec2 res) {
-    vec2 px = 1.0 / res;
-    vec2 vc = uv * res - 0.5;
-    vec2 f = fract(vc);
-    vec2 i = floor(vc);
-
-    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
-    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
-    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
-    vec2 w3 = f * f * (-0.5 + 0.5 * f);
-
-    vec2 w12 = w1 + w2;
-    vec2 tc12 = (i + 1.0 + w2 / w12) * px;
-    vec2 tc0 = (i - 0.5) * px;
-    vec2 tc3 = (i + 2.5) * px;
-
-    vec4 c0 = texture2D(tex, vec2(tc12.x, tc0.y));
-    vec4 c1 = texture2D(tex, vec2(tc0.x, tc12.y));
-    vec4 c2 = texture2D(tex, vec2(tc12.x, tc12.y));
-    vec4 c3 = texture2D(tex, vec2(tc3.x, tc12.y));
-    vec4 c4 = texture2D(tex, vec2(tc12.x, tc3.y));
-
-    return (c0 * w12.x * w0.y + c1 * w0.x * w12.y + c2 * w12.x * w12.y + c3 * w3.x * w12.y + c4 * w12.x * w3.y) /
-           ((w0.x + w12.x + w3.x) * (w0.y + w12.y + w3.y));
-}
-
+// C2 continuous quintic Hermite filtering (Ken Perlin) for seamless, artifact-free macro magnification
 vec2 smoothUV(vec2 uv, vec2 res) {
     vec2 p = uv * res - 0.5;
     vec2 i = floor(p);
-    vec2 f = p - i;
-    f = f * f * (3.0 - 2.0 * f);
+    vec2 f = fract(p);
+    f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
     return (i + f + 0.5) / res;
 }
 
@@ -1515,14 +1491,14 @@ float heightAt(vec2 p) {
     float d = length(p);
     float rim = rimH(d);
     if (d > 2.22) return rim;
-    vec2 uv = toUV(p);
-    float fluidH = sampleBicubic(u_height, uv, vec2(768.0)).r;
+    vec2 uv = smoothUV(toUV(p), vec2(768.0));
+    float fluidH = texture2D(u_height, uv).r;
     return max(fluidH, rim);
 }
 
 vec3 normalAt(vec2 p) {
-    // Dynamically scale finite difference step with camera distance for tack-sharp macro specular highlights
-    float e = clamp(0.0032 * (u_cam_dist / 3.8), 0.0012, 0.008);
+    // Spans ~1.3 simulation texels: smooth, noise-free finite-difference surface normals
+    float e = 0.0080;
     float hR = heightAt(p + vec2(e, 0.0));
     float hL = heightAt(p - vec2(e, 0.0));
     float hU = heightAt(p + vec2(0.0, e));
@@ -1605,9 +1581,11 @@ void main() {
     vec3 colRim = vec3(0.012) + env(R, C) * (0.04 + 0.96 * fres5) + u_ink_avg * 0.08;
 
     // 3. Fluid inside dish (ferrofluid & ink)
-    vec2 uvCoord = toUV(p.xz);
-    vec4 Hs = sampleBicubic(u_height, uvCoord, vec2(768.0));
-    float ferroMask = smoothstep(-0.002, 0.002, Hs.a - Hs.b);
+    vec2 uvCoord = smoothUV(toUV(p.xz), vec2(768.0));
+    vec4 Hs = texture2D(u_height, uvCoord);
+    float diff = Hs.a - Hs.b;
+    float fwDiff = max(fwidth(diff), 0.0035);
+    float ferroMask = smoothstep(-fwDiff, fwDiff, diff);
 
     // Ferrofluid: black dielectric mirror (oil carrier, magnetite absorbs all transmitted light)
     float Ff = 0.045 + 0.955 * fres5;
@@ -1619,12 +1597,12 @@ void main() {
     float depth = max(Hs.b, 0.002);
     float cosT = max(-rt.y, 0.25);
     vec2 pb = p.xz + rt.xz / cosT * depth;
-    vec2 uvb = toUV(pb);
-    vec3 dye = sampleBicubic(u_dye, uvb, vec2(512.0)).rgb;
+    vec2 uvb = smoothUV(toUV(pb), vec2(512.0));
+    vec3 dye = texture2D(u_dye, uvb).rgb;
     vec3 logA = dye.r * log(max(u_ink1, vec3(0.003))) + dye.g * log(max(u_ink2, vec3(0.003))) + dye.b * log(max(u_ink3, vec3(0.003)));
     float path = depth * (1.0 / cosT + 1.0);
     vec3 trans = exp(logA * u_density * path / (2.0 * 0.32 * u_H));
-    float ferroUnder = sampleBicubic(u_height, uvb, vec2(768.0)).g;
+    float ferroUnder = texture2D(u_height, smoothUV(toUV(pb), vec2(768.0))).g;
     float floorLight = 0.95 * (1.0 - 0.85 * ferroUnder);
     vec3 colI = vec3(floorLight) * trans * (1.0 - Fi) + env(R, C) * Fi;
 
