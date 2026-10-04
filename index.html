@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4034</title>
+    <title>LiteStep VJ vers. 4035</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,7 +45,7 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4034</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4035</span></h1>
                     <div class="hud-scene-status">
                         <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
@@ -378,6 +378,14 @@
                                     <option value="1">1: Center Deflector</option>
                                     <option value="2" selected>2: Twin Slalom Pegs</option>
                                     <option value="3">3: Triangle Diverters</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="bubble-obstacle-style-select">Obstacle Style</label>
+                                <select id="bubble-obstacle-style-select" class="drawer-dropdown">
+                                    <option value="dark" selected>Dark Shapes</option>
+                                    <option value="invisible">Invisible (Streamlines Only)</option>
+                                    <option value="glass">Luminous Glass</option>
                                 </select>
                             </div>
                             <div class="dropdown-item">
@@ -934,7 +942,7 @@
                         </div>
                         <div class="prop-row">
                             <span class="prop-label" title="Applied magnetic field H. Dipolar repulsion grows with H²: higher field → finer, more branched labyrinth; lower field → fluid relaxes into droplets">Field Strength (H)</span>
-                            <input type="range" class="ferro-slider" id="slider-ferro-field" min="0.00" max="2.50" step="0.01" value="1.00">
+                            <input type="range" class="ferro-slider" id="slider-ferro-field" min="0.00" max="5.00" step="0.02" value="1.00">
                             <span class="prop-val" id="val-ferro-field">1.00</span>
                         </div>
                         <div class="prop-row">

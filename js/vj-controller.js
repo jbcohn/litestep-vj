@@ -975,6 +975,9 @@ class VJController {
         var obsSel = document.getElementById("bubble-obstacles-select");
         if (obsSel && bubble.numObstacles !== undefined) obsSel.value = String(bubble.numObstacles);
 
+        var styleSel = document.getElementById("bubble-obstacle-style-select");
+        if (styleSel && bubble.obstacleStyle !== undefined) styleSel.value = String(bubble.obstacleStyle);
+
         var dirSel = document.getElementById("bubble-direction-select");
         if (dirSel && bubble.flowDirection !== undefined) dirSel.value = String(bubble.flowDirection);
 
@@ -1764,6 +1767,17 @@ class VJController {
                 var bubble = this.scenes[2];
                 if (bubble && bubble.setNumObstacles) {
                     bubble.setNumObstacles(e.target.value);
+                    this.syncBubblesUI();
+                }
+            });
+        }
+
+        var bubbleStyleSel = document.getElementById("bubble-obstacle-style-select");
+        if (bubbleStyleSel) {
+            bubbleStyleSel.addEventListener("change", (e) => {
+                var bubble = this.scenes[2];
+                if (bubble && bubble.setObstacleStyle) {
+                    bubble.setObstacleStyle(e.target.value);
                     this.syncBubblesUI();
                 }
             });

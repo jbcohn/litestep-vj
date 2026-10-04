@@ -147,6 +147,7 @@ class BubbleScene {
 
         // 0 to 3 Interactive Deflection Obstacles
         this.numObstacles = 2;        // Default: 2 staggered slalom pegs
+        this.obstacleStyle = "dark";  // "dark", "invisible", or "glass"
         this.obstacles = [];
 
         // Liquid Beat Hit & Pop state
@@ -579,59 +580,66 @@ class BubbleScene {
         ctx.fillStyle = pal.bg;
         ctx.fillRect(0, 0, width, height);
 
-        // 0. Render Deflection Obstacles (Sleek Obsidian/Quartz Luminous Glass Spheres)
-        if (this.obstacles && this.obstacles.length > 0) {
+        // 0. Render Deflection Obstacles (Dark shapes or Invisible force fields)
+        if (this.obstacles && this.obstacles.length > 0 && this.obstacleStyle !== "invisible") {
             for (var o = 0; o < this.obstacles.length; o++) {
                 var obs = this.obstacles[o];
-                var pulse = obs.pulse || 0;
                 var or = obs.r;
 
-                // Outer caustic rim glow reacting to bubble impacts and beat
-                var glowR = or * (1.18 + pulse * 0.22);
-                var glowGrad = ctx.createRadialGradient(obs.x, obs.y, or * 0.8, obs.x, obs.y, glowR);
-                var rimAlpha = 0.25 + pulse * 0.55 + ((audio && audio.bass) ? audio.bass : 0) * 0.2;
-                glowGrad.addColorStop(0.0, "rgba(220, 238, 255, 0.0)");
-                glowGrad.addColorStop(0.6, `rgba(180, 225, 255, ${rimAlpha * 0.4})`);
-                glowGrad.addColorStop(0.85, `rgba(140, 200, 255, ${rimAlpha * 0.7})`);
-                glowGrad.addColorStop(1.0, "rgba(200, 235, 255, 0.0)");
-                ctx.fillStyle = glowGrad;
-                ctx.beginPath();
-                ctx.arc(obs.x, obs.y, glowR, 0, Math.PI * 2);
-                ctx.fill();
+                if (this.obstacleStyle === "glass") {
+                    var pulse = obs.pulse || 0;
+                    var glowR = or * (1.18 + pulse * 0.22);
+                    var glowGrad = ctx.createRadialGradient(obs.x, obs.y, or * 0.8, obs.x, obs.y, glowR);
+                    var rimAlpha = 0.25 + pulse * 0.55 + ((audio && audio.bass) ? audio.bass : 0) * 0.2;
+                    glowGrad.addColorStop(0.0, "rgba(220, 238, 255, 0.0)");
+                    glowGrad.addColorStop(0.6, `rgba(180, 225, 255, ${rimAlpha * 0.4})`);
+                    glowGrad.addColorStop(0.85, `rgba(140, 200, 255, ${rimAlpha * 0.7})`);
+                    glowGrad.addColorStop(1.0, "rgba(200, 235, 255, 0.0)");
+                    ctx.fillStyle = glowGrad;
+                    ctx.beginPath();
+                    ctx.arc(obs.x, obs.y, glowR, 0, Math.PI * 2);
+                    ctx.fill();
 
-                // Dark obsidian sphere body
-                var bodyGrad = ctx.createRadialGradient(
-                    obs.x - or * 0.35, obs.y - or * 0.35, or * 0.1,
-                    obs.x, obs.y, or
-                );
-                bodyGrad.addColorStop(0.0, "#1e293b");
-                bodyGrad.addColorStop(0.5, "#0f172a");
-                bodyGrad.addColorStop(0.9, "#050811");
-                bodyGrad.addColorStop(1.0, "#020408");
-                ctx.fillStyle = bodyGrad;
-                ctx.beginPath();
-                ctx.arc(obs.x, obs.y, or, 0, Math.PI * 2);
-                ctx.fill();
+                    var bodyGrad = ctx.createRadialGradient(
+                        obs.x - or * 0.35, obs.y - or * 0.35, or * 0.1,
+                        obs.x, obs.y, or
+                    );
+                    bodyGrad.addColorStop(0.0, "#1e293b");
+                    bodyGrad.addColorStop(0.5, "#0f172a");
+                    bodyGrad.addColorStop(0.9, "#050811");
+                    bodyGrad.addColorStop(1.0, "#020408");
+                    ctx.fillStyle = bodyGrad;
+                    ctx.beginPath();
+                    ctx.arc(obs.x, obs.y, or, 0, Math.PI * 2);
+                    ctx.fill();
 
-                // Refractive inner ring
-                ctx.strokeStyle = `rgba(220, 240, 255, ${0.45 + pulse * 0.35})`;
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(obs.x, obs.y, Math.max(1, or - 2.5), 0, Math.PI * 2);
-                ctx.stroke();
+                    ctx.strokeStyle = `rgba(220, 240, 255, ${0.45 + pulse * 0.35})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(obs.x, obs.y, Math.max(1, or - 2.5), 0, Math.PI * 2);
+                    ctx.stroke();
 
-                // Upper-left high-gloss specular highlight
-                var specGrad = ctx.createRadialGradient(
-                    obs.x - or * 0.38, obs.y - or * 0.38, 0,
-                    obs.x - or * 0.38, obs.y - or * 0.38, or * 0.28
-                );
-                specGrad.addColorStop(0.0, "rgba(255, 255, 255, 0.85)");
-                specGrad.addColorStop(0.4, "rgba(230, 245, 255, 0.55)");
-                specGrad.addColorStop(1.0, "rgba(200, 230, 255, 0.0)");
-                ctx.fillStyle = specGrad;
-                ctx.beginPath();
-                ctx.arc(obs.x - or * 0.38, obs.y - or * 0.38, or * 0.28, 0, Math.PI * 2);
-                ctx.fill();
+                    var specGrad = ctx.createRadialGradient(
+                        obs.x - or * 0.38, obs.y - or * 0.38, 0,
+                        obs.x - or * 0.38, obs.y - or * 0.38, or * 0.28
+                    );
+                    specGrad.addColorStop(0.0, "rgba(255, 255, 255, 0.85)");
+                    specGrad.addColorStop(0.4, "rgba(230, 245, 255, 0.55)");
+                    specGrad.addColorStop(1.0, "rgba(200, 230, 255, 0.0)");
+                    ctx.fillStyle = specGrad;
+                    ctx.beginPath();
+                    ctx.arc(obs.x - or * 0.38, obs.y - or * 0.38, or * 0.28, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    // "dark": Clean, minimal matte dark shapes (seamless with void, zero loud specular/rings)
+                    ctx.fillStyle = "#070b12";
+                    ctx.beginPath();
+                    ctx.arc(obs.x, obs.y, or, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+                    ctx.lineWidth = 1.0;
+                    ctx.stroke();
+                }
             }
         }
 
@@ -765,6 +773,10 @@ class BubbleScene {
     setNumObstacles(val) {
         this.numObstacles = Math.max(0, Math.min(3, parseInt(val, 10) || 0));
         this._updateObstaclesLayout();
+    }
+
+    setObstacleStyle(style) {
+        this.obstacleStyle = (style === "invisible" || style === "glass") ? style : "dark";
     }
 
     setFlowDirection(dir) {

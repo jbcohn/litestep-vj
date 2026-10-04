@@ -595,11 +595,11 @@ class FerrofluidScene {
         this.fieldSmooth += (target - this.fieldSmooth) * (1 - Math.exp(-dt * rate));
 
         this.fieldEff = this.fieldSmooth * rampS * (1.0 + 0.38 * bassDrive + 0.28 * this.kickPulse * react) + 0.25 * (this.agitation + this.midAgitate);
-        this.brep = Math.min(4.0, 2.0 * this.fieldEff * this.fieldEff);
+        this.brep = Math.min(16.0, 0.85 * this.fieldEff * this.fieldEff);
 
         // Swift-Hohenberg spike drive: proportional to H - Hc + kick eruption + drop burst
-        var over = (this.fieldEff - P.spikeThreshold) / 0.4;
-        this.spikeR = 0.55 * Math.max(-0.6, Math.min(1.0, over))
+        var over = (this.fieldEff - P.spikeThreshold) / 0.45;
+        this.spikeR = 0.55 * Math.max(-0.6, Math.min(2.5, over))
                     + 1.25 * this.spikeKickBurst
                     + 0.95 * this.dropBurst * Math.min(1.0, react + 0.3);
         if (rampS < 0.5) this.spikeR = Math.min(this.spikeR, -0.2);
