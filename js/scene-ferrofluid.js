@@ -1476,29 +1476,48 @@ const float WS = 0.208;
 const float TURNTABLE = 0.012;
 vec2 toUV(vec2 p) { return p * WS + 0.5; }
 
-// C2 continuous quintic Hermite filtering (Ken Perlin) for seamless, artifact-free macro magnification
-vec2 smoothUV(vec2 uv, vec2 res) {
-    vec2 p = uv * res - 0.5;
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    return (i + f + 0.5) / res;
+// Uniform cubic B-spline reconstruction (C2, no ringing) using 4 bilinear fetches.
+// Unlike a smoothstep UV warp (which flattens values at texel centres and makes iso-contours terraced),
+// this gives genuinely smooth iso-contours and normals at any magnification of the 768 grid.
+vec4 sampleBS(sampler2D tex, vec2 uv, float n) {
+    vec2 vc = uv * n - 0.5;
+    vec2 i = floor(vc);
+    vec2 f = vc - i;
+    vec2 f2 = f * f, f3 = f2 * f;
+    vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+    vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    vec2 w3 = f3 / 6.0;
+    vec2 g0 = w0 + w1, g1 = w2 + w3;
+    vec2 h0 = (i - 1.0 + w1 / g0 + 0.5) / n;
+    vec2 h1 = (i + 1.0 + w3 / g1 + 0.5) / n;
+    vec4 a = texture2D(tex, vec2(h0.x, h0.y));
+    vec4 b = texture2D(tex, vec2(h1.x, h0.y));
+    vec4 c = texture2D(tex, vec2(h0.x, h1.y));
+    vec4 d = texture2D(tex, vec2(h1.x, h1.y));
+    return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
 }
 
 float rimH(float d) { float x = (d - 2.255) / 0.032; return 0.055 * exp(-x * x); }
 
+// Cheap bilinear height for ray marching
+float heightFast(vec2 p) {
+    float d = length(p);
+    float rim = rimH(d);
+    if (d > 2.22) return rim;
+    return max(texture2D(u_height, toUV(p)).r, rim);
+}
+
+// Smooth bicubic height for final surface / normals
 float heightAt(vec2 p) {
     float d = length(p);
     float rim = rimH(d);
     if (d > 2.22) return rim;
-    vec2 uv = smoothUV(toUV(p), vec2(768.0));
-    float fluidH = texture2D(u_height, uv).r;
-    return max(fluidH, rim);
+    return max(sampleBS(u_height, toUV(p), 768.0).r, rim);
 }
 
 vec3 normalAt(vec2 p) {
-    // Spans ~1.3 simulation texels: smooth, noise-free finite-difference surface normals
-    float e = 0.0080;
+    float e = 0.0060;
     float hR = heightAt(p + vec2(e, 0.0));
     float hL = heightAt(p - vec2(e, 0.0));
     float hU = heightAt(p + vec2(0.0, e));
@@ -1551,7 +1570,7 @@ void main() {
     bool hit = false;
     for (int i = 0; i < 84; i++) {
         vec3 p = ro + rd * t;
-        float dy = p.y - heightAt(p.xz);
+        float dy = p.y - heightFast(p.xz);
         if (dy < 0.0) { hit = true; break; }
         tPrev = t;
         t += clamp(dy * 0.55, 0.001, 0.04);
@@ -1581,8 +1600,7 @@ void main() {
     vec3 colRim = vec3(0.012) + env(R, C) * (0.04 + 0.96 * fres5) + u_ink_avg * 0.08;
 
     // 3. Fluid inside dish (ferrofluid & ink)
-    vec2 uvCoord = smoothUV(toUV(p.xz), vec2(768.0));
-    vec4 Hs = texture2D(u_height, uvCoord);
+    vec4 Hs = sampleBS(u_height, toUV(p.xz), 768.0);
     float diff = Hs.a - Hs.b;
     float fwDiff = max(fwidth(diff), 0.0035);
     float ferroMask = smoothstep(-fwDiff, fwDiff, diff);
@@ -1597,12 +1615,11 @@ void main() {
     float depth = max(Hs.b, 0.002);
     float cosT = max(-rt.y, 0.25);
     vec2 pb = p.xz + rt.xz / cosT * depth;
-    vec2 uvb = smoothUV(toUV(pb), vec2(512.0));
-    vec3 dye = texture2D(u_dye, uvb).rgb;
+    vec3 dye = sampleBS(u_dye, toUV(pb), 512.0).rgb;
     vec3 logA = dye.r * log(max(u_ink1, vec3(0.003))) + dye.g * log(max(u_ink2, vec3(0.003))) + dye.b * log(max(u_ink3, vec3(0.003)));
     float path = depth * (1.0 / cosT + 1.0);
     vec3 trans = exp(logA * u_density * path / (2.0 * 0.32 * u_H));
-    float ferroUnder = texture2D(u_height, smoothUV(toUV(pb), vec2(768.0))).g;
+    float ferroUnder = sampleBS(u_height, toUV(pb), 768.0).g;
     float floorLight = 0.95 * (1.0 - 0.85 * ferroUnder);
     vec3 colI = vec3(floorLight) * trans * (1.0 - Fi) + env(R, C) * Fi;
 
