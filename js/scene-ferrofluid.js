@@ -56,6 +56,8 @@ class FerrofluidScene {
         this.targetPanZ = 0.0;
         this.isPanning = false;
 
+        this.magnification = 2.0;
+        this.targetMag = 2.0;
         this.zoom = 3.8;
         this.targetZoom = 3.8;
 
@@ -130,11 +132,10 @@ class FerrofluidScene {
         this.inkSlots = [0, 3, 4];
         this.customInkColors = [null, null, null];
 
-        // Grid sizes
-        this.N = 384;      // phase field
+        // Grid sizes (2x resolution: 768² phase field, 512² dye)
+        this.N = 768;      // phase field & height field
         this.NL = 128;     // low-res (dipolar kernel, spikes, flow)
-        this.ND = 256;     // dye
-
+        this.ND = 512;     // dye
         this.rt = {};
         this.mat = {};
 
@@ -149,6 +150,7 @@ class FerrofluidScene {
         this.agitation = 0.0;
         this.dropBurst = 0.0;
         this.kickPulse = 0.0;
+        this.spikeKickBurst = 0.0;
         this.magnetPos = new THREE.Vector2(0.5, 0.5);
         this.magnetTarget = new THREE.Vector2(0.5, 0.5);
         this.magnetVel = new THREE.Vector2(0, 0);
@@ -534,35 +536,69 @@ class FerrofluidScene {
         this.ramp = Math.min(1.0, this.ramp + dt / Math.max(0.1, this.rampDuration));
         var rampS = this.ramp * this.ramp * (3 - 2 * this.ramp);
 
-        // Musical state → field target multiplier
+        var sub = audio ? (audio.sub || 0) : 0;
+        var bass = audio ? (audio.bass || 0) : 0;
+        var mids = audio ? (audio.mids || 0) : 0;
+        var highs = audio ? (audio.highs || 0) : 0;
+
+        // 1. Kick transient & bass punch: instant spike eruption
+        if (audio && (audio.isBeat || bass > 0.45) && react > 0) {
+            var kickPower = audio.isBeat ? (0.75 + 0.5 * bass) : (0.45 * bass);
+            this.spikeKickBurst = Math.max(this.spikeKickBurst, kickPower * react);
+            this.kickPulse = Math.max(this.kickPulse, 0.6 + 0.5 * sub);
+        }
+        this.spikeKickBurst *= Math.exp(-dt * 5.5);
+        this.kickPulse *= Math.exp(-dt * 6.0);
+
+        // 2. Continuous Sub-bass pumping: labyrinth ribbons dilate & breathe
+        var bassDrive = (sub * 0.65 + bass * 0.35) * react;
+
+        // 3. Mid-frequency acoustic dispersion
+        this.midAgitate = mids * 0.5 * react;
+
+        this.agitation *= Math.exp(-dt * 1.4);
+        this.dropBurst *= Math.exp(-dt * 0.9);
+        if (audio && audio.musicalState === "drop" && react > 0) {
+            this.dropBurst = Math.max(this.dropBurst, 0.85);
+            this.agitation = Math.max(this.agitation, 0.75);
+        }
+
+        // 5. Musical state → field target multiplier & choreography
         var mult = 1.0, rate = 2.0;
         if (audio && react > 0) {
             var st = audio.musicalState;
             var ten = audio.tension || 0;
-            if (st === "breakdown") mult = 0.80;
-            else if (st === "buildup") mult = 1.0 + 0.45 * ten;
-            else if (st === "pre_drop") { mult = 0.45; rate = 5.0; }
-            else if (st === "drop") { mult = 1.30; rate = 10.0; }
+            if (st === "breakdown") {
+                mult = 0.75;
+                rate = 1.5;
+            } else if (st === "buildup") {
+                mult = 1.0 + 0.60 * ten;
+                rate = 3.0;
+                P.magnetPull = 0.25 + 0.30 * ten;
+            } else if (st === "pre_drop") {
+                mult = 0.55;
+                rate = 6.0;
+                P.flow = 0.15;
+            } else if (st === "drop") {
+                mult = 1.35;
+                rate = 12.0;
+                P.flow = 1.0;
+                this.dropBurst = Math.max(this.dropBurst, 0.85);
+                this.agitation = Math.max(this.agitation, 0.75);
+            }
             mult = 1.0 + (mult - 1.0) * Math.min(1.0, react);
         }
         var target = P.field * mult;
         this.fieldSmooth += (target - this.fieldSmooth) * (1 - Math.exp(-dt * rate));
 
-        // Kick pulse
-        var sub = audio ? (audio.sub || 0) : 0;
-        if (audio && audio.isBeat) this.kickPulse = Math.max(this.kickPulse, 0.5 + 0.5 * sub);
-        this.kickPulse *= Math.exp(-dt * 7.0);
-
-        this.agitation *= Math.exp(-dt * 1.4);
-        this.dropBurst *= Math.exp(-dt * 0.9);
-        if (audio && audio.musicalState === "drop" && react > 0) this.dropBurst = Math.max(this.dropBurst, 0.35);
-
-        this.fieldEff = this.fieldSmooth * rampS * (1 + 0.18 * this.kickPulse * react) + 0.25 * this.agitation;
+        this.fieldEff = this.fieldSmooth * rampS * (1.0 + 0.38 * bassDrive + 0.28 * this.kickPulse * react) + 0.25 * (this.agitation + this.midAgitate);
         this.brep = Math.min(4.0, 2.0 * this.fieldEff * this.fieldEff);
 
-        // Spike drive (Swift-Hohenberg r): proportional to H - Hc
+        // Swift-Hohenberg spike drive: proportional to H - Hc + kick eruption + drop burst
         var over = (this.fieldEff - P.spikeThreshold) / 0.4;
-        this.spikeR = 0.55 * Math.max(-0.6, Math.min(1.0, over)) + 0.9 * this.dropBurst * Math.min(1.0, react + 0.3);
+        this.spikeR = 0.55 * Math.max(-0.6, Math.min(1.0, over))
+                    + 1.25 * this.spikeKickBurst
+                    + 0.95 * this.dropBurst * Math.min(1.0, react + 0.3);
         if (rampS < 0.5) this.spikeR = Math.min(this.spikeR, -0.2);
 
         // Magnet motion
@@ -575,7 +611,7 @@ class FerrofluidScene {
         }
         if (audio && audio.isBeat && react > 0) {
             var ja = Math.random() * Math.PI * 2;
-            var jm = 0.006 * (0.4 + sub) * react;
+            var jm = 0.012 * (0.5 + sub) * react;
             this.magnetJitter.x += Math.cos(ja) * jm;
             this.magnetJitter.y += Math.sin(ja) * jm;
         }
@@ -644,7 +680,7 @@ class FerrofluidScene {
         pu.u_pull.value = P.magnetPull * (0.4 + 0.6 * Math.min(1.5, this.fieldEff));
         pu.u_local.value = P.focus;
         pu.u_magpos.value.copy(this.magnetEff);
-        pu.u_agitate.value = this.agitation;
+        pu.u_agitate.value = this.agitation + (this.midAgitate || 0);
         pu.u_time.value = this.time;
         pu.u_mouse_pos.value.copy(this.mouseUV);
         pu.u_mouse_action.value = this.mouseAction;
@@ -666,14 +702,14 @@ class FerrofluidScene {
             t = R.spikeA; R.spikeA = R.spikeB; R.spikeB = t;
         }
 
-        // 7. Incompressible ink flow driven by interface motion
+        // 7. Incompressible ink flow driven by interface motion & acoustic vorticity
         if (P.flow > 0.001) {
             var vu = M.velraw.uniforms;
             vu.u_state.value = R.phaseA.texture;
             vu.u_gain.value = P.flow * 3.0 * 0.2 * S / this.N;
             vu.u_magvel.value.copy(this.magnetVel);
             vu.u_magpos.value.copy(this.magnetEff);
-            vu.u_agitate.value = this.agitation + this.dropBurst * 0.5;
+            vu.u_agitate.value = this.agitation + this.dropBurst * 0.6 + (this.midAgitate || 0) * 1.5;
             vu.u_time.value = this.time;
             this._pass(M.velraw, R.vel);
 
@@ -702,8 +738,10 @@ class FerrofluidScene {
         hu.u_hb.value = R.hblur.texture;
         hu.u_state.value = R.phaseA.texture;
         hu.u_spike.value = R.spikeA.texture;
-        hu.u_H.value = P.fluidHeight;
-        hu.u_spikeAmp.value = P.fluidHeight * 2.2;
+        var effH = P.fluidHeight * (1.0 + 0.35 * this.spikeKickBurst * P.audioReact);
+        this.effFluidHeight = effH;
+        hu.u_H.value = effH;
+        hu.u_spikeAmp.value = effH * (2.2 + 2.0 * this.spikeKickBurst * P.audioReact);
         this._pass(M.hcomp, R.height);
 
         r.setRenderTarget(null);
@@ -719,6 +757,7 @@ class FerrofluidScene {
         this.panX += (this.targetPanX - this.panX) * 0.15;
         this.panZ += (this.targetPanZ - this.panZ) * 0.15;
         this.zoom += (this.targetZoom - this.zoom) * 0.15;
+        this.magnification = 7.6 / this.zoom;
 
         this._updateDrivers(dt, audio);
         this._simulate();
@@ -729,7 +768,7 @@ class FerrofluidScene {
         u.u_yaw.value = this.yaw;
         u.u_pan.value.set(this.panX, this.panZ);
         u.u_cam_dist.value = this.zoom;
-        u.u_H.value = this.params.fluidHeight;
+        u.u_H.value = this.effFluidHeight || this.params.fluidHeight;
         u.u_gloss.value = this.params.gloss;
         u.u_highs.value = audio ? (audio.highs || 0) : 0;
         u.u_density.value = this.params.density;
@@ -908,8 +947,7 @@ class FerrofluidScene {
         window.addEventListener("wheel", (e) => {
             if (!this._isActive() || this._isUI(e.target)) return;
             e.preventDefault();
-            this.targetZoom = Math.max(1.5, Math.min(8.0, this.targetZoom + e.deltaY * 0.0035));
-            this._syncZoomUI();
+            this.zoomBy(-e.deltaY * 0.002);
         }, { passive: false });
 
         var lastPinchDist = null;
@@ -920,8 +958,7 @@ class FerrofluidScene {
                 var dy = e.touches[0].clientY - e.touches[1].clientY;
                 var dist = Math.hypot(dx, dy);
                 if (lastPinchDist !== null) {
-                    this.targetZoom = Math.max(1.5, Math.min(8.0, this.targetZoom + (lastPinchDist - dist) * 0.012));
-                    this._syncZoomUI();
+                    this.zoomBy((dist - lastPinchDist) * 0.008);
                 }
                 lastPinchDist = dist;
             }
@@ -945,28 +982,31 @@ class FerrofluidScene {
     _syncZoomUI() {
         var slider = document.getElementById("slider-ferro-zoom");
         var valEl = document.getElementById("val-ferro-zoom");
-        if (slider) slider.value = this.targetZoom;
-        if (valEl) valEl.textContent = this.targetZoom.toFixed(1) + "x";
+        if (slider) slider.value = this.targetMag.toFixed(1);
+        if (valEl) valEl.textContent = this.targetMag.toFixed(1) + "x";
     }
 
     setZoom(val) {
-        this.targetZoom = Math.max(1.5, Math.min(8.0, val));
+        this.targetMag = Math.max(1.0, Math.min(5.5, val));
+        this.targetZoom = 7.6 / this.targetMag;
         this._syncZoomUI();
     }
 
     zoomBy(delta) {
-        this.targetZoom = Math.max(1.5, Math.min(8.0, this.targetZoom + delta));
+        this.targetMag = Math.max(1.0, Math.min(5.5, this.targetMag + delta));
+        this.targetZoom = 7.6 / this.targetMag;
         this._syncZoomUI();
     }
 
     resetCamera(immediate) {
         this.targetPanX = 0.0;
         this.targetPanZ = 0.0;
+        this.targetMag = 2.0;
         this.targetZoom = 3.8;
         this.targetPitch = 1.33;
         this.targetYaw = 0.0;
         if (immediate) {
-            this.panX = 0.0; this.panZ = 0.0; this.zoom = 3.8; this.pitch = 1.33; this.yaw = 0.0;
+            this.panX = 0.0; this.panZ = 0.0; this.zoom = 3.8; this.magnification = 2.0; this.pitch = 1.33; this.yaw = 0.0;
         }
         this._syncZoomUI();
     }
@@ -1409,7 +1449,7 @@ float heightAt(vec2 p) {
     float d = length(p);
     float rim = rimH(d);
     if (d > 2.22) return rim;
-    vec2 uv = smoothUV(toUV(p), vec2(384.0));
+    vec2 uv = smoothUV(toUV(p), vec2(768.0));
     float fluidH = texture2D(u_height, uv).r;
     return max(fluidH, rim);
 }
@@ -1437,10 +1477,11 @@ float softbox(vec3 R, vec3 L, vec2 size) {
 vec3 env(vec3 R, vec3 C) {
     vec3 col = mix(vec3(0.008, 0.009, 0.011), vec3(0.03, 0.031, 0.036), clamp(R.y, 0.0, 1.0));
     col += u_ink_avg * 0.16 * smoothstep(0.30, 0.0, R.y);              // surrounding ink seen at grazing angles
-    col += softbox(R, normalize(vec3(0.55, 1.0, -0.45)), vec2(0.42, 0.26)) * vec3(1.0, 0.96, 0.90) * 6.0 * u_gloss;
-    col += softbox(R, normalize(vec3(-0.75, 0.8, 0.55)), vec2(0.30, 0.16)) * vec3(0.85, 0.92, 1.0) * 2.5 * u_gloss;
+    float strobe = 1.0 + u_highs * 1.5;
+    col += softbox(R, normalize(vec3(0.55, 1.0, -0.45)), vec2(0.42, 0.26)) * vec3(1.0, 0.96, 0.90) * 6.0 * u_gloss * strobe;
+    col += softbox(R, normalize(vec3(-0.75, 0.8, 0.55)), vec2(0.30, 0.16)) * vec3(0.85, 0.92, 1.0) * 2.5 * u_gloss * strobe;
     float ca = acos(clamp(dot(R, C), -1.0, 1.0));
-    col += smoothstep(0.022, 0.0, abs(ca - 0.17)) * 4.0 * u_gloss * (0.8 + u_highs * 0.6);   // lens ring-light
+    col += smoothstep(0.022, 0.0, abs(ca - 0.17)) * 4.0 * u_gloss * (0.8 + u_highs * 2.0);   // lens ring-light
     return col;
 }
 
@@ -1497,7 +1538,7 @@ void main() {
     vec3 colRim = vec3(0.012) + env(R, C) * (0.04 + 0.96 * fres5) + u_ink_avg * 0.08;
 
     // 3. Fluid inside dish (ferrofluid & ink)
-    vec2 uvCoord = smoothUV(toUV(p.xz), vec2(384.0));
+    vec2 uvCoord = smoothUV(toUV(p.xz), vec2(768.0));
     vec4 Hs = texture2D(u_height, uvCoord);
     float ferroMask = smoothstep(-0.002, 0.002, Hs.a - Hs.b);
 
@@ -1511,12 +1552,12 @@ void main() {
     float depth = max(Hs.b, 0.002);
     float cosT = max(-rt.y, 0.25);
     vec2 pb = p.xz + rt.xz / cosT * depth;
-    vec2 uvb = smoothUV(toUV(pb), vec2(256.0));
+    vec2 uvb = smoothUV(toUV(pb), vec2(512.0));
     vec3 dye = texture2D(u_dye, uvb).rgb;
     vec3 logA = dye.r * log(max(u_ink1, vec3(0.003))) + dye.g * log(max(u_ink2, vec3(0.003))) + dye.b * log(max(u_ink3, vec3(0.003)));
     float path = depth * (1.0 / cosT + 1.0);
     vec3 trans = exp(logA * u_density * path / (2.0 * 0.32 * u_H));
-    float ferroUnder = texture2D(u_height, smoothUV(uvb, vec2(384.0))).g;
+    float ferroUnder = texture2D(u_height, smoothUV(uvb, vec2(768.0))).g;
     float floorLight = 0.95 * (1.0 - 0.85 * ferroUnder);
     vec3 colI = vec3(floorLight) * trans * (1.0 - Fi) + env(R, C) * Fi;
 

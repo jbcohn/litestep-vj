@@ -778,14 +778,14 @@ class VJController {
             else if (e.code === "Equal" || e.code === "NumpadAdd") {
                 if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].zoomBy) {
                     e.preventDefault();
-                    this.scenes[5].zoomBy(-0.35);
+                    this.scenes[5].zoomBy(0.25);
                     this.syncFerrofluidUI();
                 }
             }
             else if (e.code === "Minus" || e.code === "NumpadSubtract") {
                 if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].zoomBy) {
                     e.preventDefault();
-                    this.scenes[5].zoomBy(0.35);
+                    this.scenes[5].zoomBy(-0.25);
                     this.syncFerrofluidUI();
                 }
             }
@@ -886,7 +886,7 @@ class VJController {
         this._ferroSliderMap().forEach((item) => {
             var slider = document.getElementById(item.id);
             var valEl = document.getElementById(item.valId);
-            var val = (item.key === "zoom") ? ferroScene.targetZoom : p[item.key];
+            var val = (item.key === "zoom") ? (ferroScene.targetMag || 2.0) : p[item.key];
             if (slider && val !== undefined) slider.value = val;
             if (valEl && val !== undefined) {
                 valEl.textContent = Number(val).toFixed(item.prec) + (item.suffix || "");
