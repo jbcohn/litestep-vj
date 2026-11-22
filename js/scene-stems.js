@@ -82,6 +82,7 @@ class StemWaveformScene {
 
         this.writeIdx = 0;
         this.filledSlices = 0;
+        this.totalSlicesWritten = 0;
         this._sampleAccum = 0;
         this._prevBeatCount = 0;
         this._pendingBeatHit = 0;
@@ -106,9 +107,10 @@ class StemWaveformScene {
         this._interactionBound = false;
 
         // Reusable column buffers to minimize per-frame GC
-        this._maxCols = 640;
+        this._maxCols = 900;
         this._colX = new Float32Array(this._maxCols);
         this._colAge = new Float32Array(this._maxCols);
+        this._colAbsId = new Float64Array(this._maxCols);
         this._colSplit = new Float32Array(this._maxCols);
         this._colIsFuture = new Uint8Array(this._maxCols);
         this._colFade = new Float32Array(this._maxCols);
@@ -316,6 +318,7 @@ class StemWaveformScene {
         this.bufBeatHit[idx] = hitVal;
         this.writeIdx = (idx + 1) % this.MAX_HISTORY;
         if (this.filledSlices < this.MAX_HISTORY) this.filledSlices++;
+        this.totalSlicesWritten++;
     }
 
     update(dt, audio, isVisible) {
@@ -494,38 +497,72 @@ class StemWaveformScene {
         return buf[idx0] * (1.0 - f) + buf[idx1] * f;
     }
 
-    _sampleRingSmooth(buf, centerAge, halfWidthSlices) {
+    _readRingAtContinuousAbs(buf, absPos) {
+        var maxId = this.totalSlicesWritten - 1;
+        var minId = Math.max(0, this.totalSlicesWritten - this.filledSlices);
+        if (this.filledSlices <= 1 || absPos < minId || absPos > maxId) return 0.0;
+        var i0 = Math.floor(absPos);
+        var i1 = Math.min(maxId, i0 + 1);
+        var f = absPos - i0;
+        var maxH = this.MAX_HISTORY;
+        return buf[i0 % maxH] * (1.0 - f) + buf[i1 % maxH] * f;
+    }
+
+    _sampleAbsFixed(buf, absPos, span) {
+        var maxId = this.totalSlicesWritten - 1;
+        var minId = Math.max(0, this.totalSlicesWritten - this.filledSlices);
+        if (this.filledSlices <= 1 || absPos < minId || absPos > maxId) return 0.0;
+        var sp = Math.max(1, span || 1);
+        var pL = Math.max(minId, absPos - sp);
+        var pR = Math.min(maxId, absPos + sp);
+        var vL = this._readRingAtContinuousAbs(buf, pL);
+        var vC = this._readRingAtContinuousAbs(buf, absPos);
+        var vR = this._readRingAtContinuousAbs(buf, pR);
+        return 0.25 * vL + 0.50 * vC + 0.25 * vR;
+    }
+
+    _sampleRingLinear3(buf, centerAge, halfSpan) {
         var filled = this.filledSlices;
         if (filled <= 1 || centerAge < 0 || centerAge >= filled - 1) return 0.0;
-        var span = Math.max(0.4, halfWidthSlices);
+        var span = Math.max(0.4, halfSpan);
         var vL = this._readRingLinear(buf, Math.max(0.0, centerAge - span * 0.65));
         var vC = this._readRingLinear(buf, centerAge);
         var vR = this._readRingLinear(buf, Math.min(filled - 1.001, centerAge + span * 0.65));
-        var wMean = 0.25 * vL + 0.50 * vC + 0.25 * vR;
-        var vMax = vL > vC ? (vL > vR ? vL : vR) : (vC > vR ? vC : vR);
-        return 0.62 * wMean + 0.38 * vMax;
+        return 0.25 * vL + 0.50 * vC + 0.25 * vR;
     }
 
-    _sampleForecastSmooth(buf, futureSlices, slicesPerBar, halfWidthSlices) {
+    _sampleForecastAbs(buf, futureAbsId, slicesPerBar, span) {
+        var sp = Math.max(1, span || 1);
         var filled = this.filledSlices;
+        var maxValid = this.totalSlicesWritten - 1 - sp;
+        if (filled < 4 || maxValid < 2) return 0.0;
+        var minValid = Math.max(0, this.totalSlicesWritten - filled) + sp;
         var s1Bar = Math.max(24, slicesPerBar);
-        var back1 = s1Bar - (futureSlices % s1Bar);
-        var v1 = this._sampleRingSmooth(buf, back1, halfWidthSlices);
+
+        var k1 = Math.max(1, Math.ceil((futureAbsId - maxValid) / s1Bar));
+        var p1 = futureAbsId - k1 * s1Bar;
+        if (p1 < minValid || p1 > maxValid) return 0.0;
+        var v1 = this._sampleAbsFixed(buf, p1, sp);
 
         var s4Bar = s1Bar * 4;
-        var back4 = s4Bar - (futureSlices % s4Bar);
-        if (filled > s4Bar + 4 && back4 < filled - 2) {
+        var k4 = Math.max(1, Math.ceil((futureAbsId - maxValid) / s4Bar));
+        var p4 = futureAbsId - k4 * s4Bar;
+        if (filled > s4Bar + 4 + sp && p4 >= minValid && p4 <= maxValid) {
             var s2Bar = s1Bar * 2;
-            var back2 = s2Bar - (futureSlices % s2Bar);
-            var v2 = this._sampleRingSmooth(buf, back2, halfWidthSlices);
-            var v4 = this._sampleRingSmooth(buf, back4, halfWidthSlices);
-            return 0.55 * v1 + 0.30 * v2 + 0.15 * v4;
+            var k2 = Math.max(1, Math.ceil((futureAbsId - maxValid) / s2Bar));
+            var p2 = futureAbsId - k2 * s2Bar;
+            if (p2 >= minValid && p2 <= maxValid) {
+                var v2 = this._sampleAbsFixed(buf, p2, sp);
+                var v4 = this._sampleAbsFixed(buf, p4, sp);
+                return 0.55 * v1 + 0.30 * v2 + 0.15 * v4;
+            }
         }
-        var s2Bar2 = s1Bar * 2;
-        var back2b = s2Bar2 - (futureSlices % s2Bar2);
-        if (filled > s2Bar2 + 4 && back2b < filled - 2) {
-            var v2b = this._sampleRingSmooth(buf, back2b, halfWidthSlices);
-            return 0.68 * v1 + 0.32 * v2b;
+        var s2BarB = s1Bar * 2;
+        var k2B = Math.max(1, Math.ceil((futureAbsId - maxValid) / s2BarB));
+        var p2B = futureAbsId - k2B * s2BarB;
+        if (filled > s2BarB + 4 + sp && p2B >= minValid && p2B <= maxValid) {
+            var v2B = this._sampleAbsFixed(buf, p2B, sp);
+            return 0.68 * v1 + 0.32 * v2B;
         }
         return v1;
     }
@@ -651,89 +688,235 @@ class StemWaveformScene {
             );
         }
 
-        // 4. Sample horizontal screen columns once for unified & all stems
-        var colStep = Math.max(2, Math.round(width / 440));
-        var nCols = Math.min(this._maxCols, Math.floor(width / colStep) + 1);
-        var halfWinSlices = Math.max(0.6, (colStep * 0.55) / pxPerSlice);
+        // 4. Sample audio-locked slice columns once (immutable absId lattice eliminates scrolling shimmer)
+        var minStrideForCap = Math.ceil(width / (Math.max(0.1, pxPerSlice) * (this._maxCols - 12)));
+        var stride = Math.max(1, minStrideForCap, Math.round(2.8 / Math.max(0.25, pxPerSlice)));
+        var tapSpan = Math.max(1, Math.floor(stride * 0.5));
+        var halfWinSlices = Math.max(0.6, stride * 0.55);
         var maxDist = Math.max(playheadX, width - playheadX, 1);
         var rightSpan = Math.max(1, width - playheadX);
+        var lastAbsId = this.totalSlicesWritten - 1;
+        var maxLiveAbs = lastAbsId - tapSpan;
+        var minValidId = Math.max(0, this.totalSlicesWritten - this.filledSlices);
+        var livePlayheadAbs = lastAbsId + subSliceAge;
 
-        for (var c = 0; c < nCols; c++) {
-            var x = c * colStep;
-            this._colX[c] = x;
-            var dx = x - playheadX;
-            var normDist = Math.abs(dx) / maxDist;
-            this._colSplit[c] = this._localSplit(normDist);
+        var nCols = 0;
+        var emitZeroCol = (xPos, isFuture) => {
+            if (nCols >= this._maxCols) return;
+            var c = nCols++;
+            this._colX[c] = xPos;
+            this._colAbsId[c] = -1;
+            this._colIsFuture[c] = isFuture;
+            this._colAge[c] = 0;
+            this._colSplit[c] = this._localSplit(Math.abs(xPos - playheadX) / maxDist);
+            this._colFade[c] = 0;
+            this._colLow[c] = this._colMid[c] = this._colHigh[c] = this._colComp[c] = this._colDetail[c] = 0;
+            for (var sIdx = 0; sIdx < stemCount; sIdx++) this._colStems[sIdx][c] = 0;
+        };
 
-            if (dx <= 0) {
-                var age = (-dx / pxPerSlice) + subSliceAge;
-                this._colIsFuture[c] = 0;
-                this._colAge[c] = age;
-                this._colFade[c] = (age < this.filledSlices - 1) ? 1.0 : 0.0;
-                this._colLow[c]    = this._sampleRingSmooth(this.bufLow, age, halfWinSlices);
-                this._colMid[c]    = this._sampleRingSmooth(this.bufMid, age, halfWinSlices);
-                this._colHigh[c]   = this._sampleRingSmooth(this.bufHigh, age, halfWinSlices);
-                this._colComp[c]   = this._sampleRingSmooth(this.bufComp, age, halfWinSlices);
-                this._colDetail[c] = this._sampleRingSmooth(this.bufDetail, age, halfWinSlices);
-                for (var sIdx = 0; sIdx < stemCount; sIdx++) {
-                    var sDef = stemDefs[sIdx];
-                    var sBuf = this._bufByKey[sDef.key];
-                    var sVal = this._sampleRingSmooth(sBuf, age, halfWinSlices);
-                    if (sDef.mixHats) {
-                        sVal = Math.min(1.0, sVal + 0.28 * this._sampleRingSmooth(this.bufHats, age, halfWinSlices));
+        if (this.filledSlices < 4 || maxLiveAbs < minValidId + 1) {
+            emitZeroCol(0, 0);
+            emitZeroCol(playheadX, 0);
+            if (playheadX + 0.5 < width) {
+                emitZeroCol(playheadX + 0.5, 1);
+                emitZeroCol(width, 1);
+            }
+        } else {
+            var leftContAbs = livePlayheadAbs - playheadX / pxPerSlice;
+            var kStartLive = Math.ceil(Math.max(minValidId + tapSpan, leftContAbs - stride) / stride) * stride;
+            var kEndLive = Math.floor(maxLiveAbs / stride) * stride;
+
+            // Leftmost screen anchor when live history doesn't yet cover left edge
+            var firstGridX = (kStartLive <= kEndLive) ? (playheadX - (livePlayheadAbs - kStartLive) * pxPerSlice) : playheadX;
+            if (firstGridX > 0.5) {
+                emitZeroCol(0, 0);
+            }
+
+            // Live interior lattice (fixed absId % stride === 0)
+            for (var idL = kStartLive; idL <= kEndLive && nCols < this._maxCols - 4; idL += stride) {
+                var xL = playheadX - (livePlayheadAbs - idL) * pxPerSlice;
+                if (xL < -stride * pxPerSlice - 1.0) continue;
+                if (xL >= playheadX - 0.1) break;
+                var cL = nCols++;
+                this._colX[cL] = xL;
+                this._colAbsId[cL] = idL;
+                this._colIsFuture[cL] = 0;
+                this._colAge[cL] = livePlayheadAbs - idL;
+                this._colSplit[cL] = this._localSplit(Math.abs(xL - playheadX) / maxDist);
+                this._colFade[cL] = 1.0;
+                this._colLow[cL]    = this._sampleAbsFixed(this.bufLow, idL, tapSpan);
+                this._colMid[cL]    = this._sampleAbsFixed(this.bufMid, idL, tapSpan);
+                this._colHigh[cL]   = this._sampleAbsFixed(this.bufHigh, idL, tapSpan);
+                this._colComp[cL]   = this._sampleAbsFixed(this.bufComp, idL, tapSpan);
+                this._colDetail[cL] = this._sampleAbsFixed(this.bufDetail, idL, tapSpan);
+                for (var sIdxL = 0; sIdxL < stemCount; sIdxL++) {
+                    var sDefL = stemDefs[sIdxL];
+                    var sValL = this._sampleAbsFixed(this._bufByKey[sDefL.key], idL, tapSpan);
+                    if (sDefL.mixHats) {
+                        sValL = Math.min(1.0, sValL + 0.28 * this._sampleAbsFixed(this.bufHats, idL, tapSpan));
                     }
-                    this._colStems[sIdx][c] = sVal;
+                    this._colStems[sIdxL][cL] = sValL;
                 }
-            } else {
-                var futureSlices = dx / pxPerSlice;
-                var distFrac = this._clamp(dx / rightSpan, 0, 1);
-                this._colIsFuture[c] = 1;
-                this._colAge[c] = futureSlices;
+            }
+
+            // Exact playhead seam vertex (live boundary x = playheadX)
+            if (nCols < this._maxCols - 3) {
+                var cPh = nCols++;
+                this._colX[cPh] = playheadX;
+                this._colAbsId[cPh] = -1;
+                this._colIsFuture[cPh] = 0;
+                this._colAge[cPh] = subSliceAge;
+                this._colSplit[cPh] = this._localSplit(0);
+                this._colFade[cPh] = 1.0;
+                this._colLow[cPh]    = this._sampleRingLinear3(this.bufLow, subSliceAge, halfWinSlices);
+                this._colMid[cPh]    = this._sampleRingLinear3(this.bufMid, subSliceAge, halfWinSlices);
+                this._colHigh[cPh]   = this._sampleRingLinear3(this.bufHigh, subSliceAge, halfWinSlices);
+                this._colComp[cPh]   = this._sampleRingLinear3(this.bufComp, subSliceAge, halfWinSlices);
+                this._colDetail[cPh] = this._sampleRingLinear3(this.bufDetail, subSliceAge, halfWinSlices);
+                for (var sIdxPh = 0; sIdxPh < stemCount; sIdxPh++) {
+                    var sDefPh = stemDefs[sIdxPh];
+                    var sValPh = this._sampleRingLinear3(this._bufByKey[sDefPh.key], subSliceAge, halfWinSlices);
+                    if (sDefPh.mixHats) {
+                        sValPh = Math.min(1.0, sValPh + 0.28 * this._sampleRingLinear3(this.bufHats, subSliceAge, halfWinSlices));
+                    }
+                    this._colStems[sIdxPh][cPh] = sValPh;
+                }
+            }
+
+            // Right side (Forecast or Center-Mirror) when playhead < width
+            if (playheadX + 0.5 < width && nCols < this._maxCols - 2) {
+                var seamDx = 0.5;
+                var seamDistFrac = this._clamp(seamDx / rightSpan, 0, 1);
 
                 if (phMode === "center_mirror") {
-                    var mirrorAge = futureSlices + subSliceAge;
-                    var mirrorFade = this.params.forecastOpacity * 0.72 * Math.pow(1.0 - distFrac, 0.7);
-                    this._colFade[c] = (mirrorAge < this.filledSlices - 1) ? mirrorFade : 0.0;
-                    this._colLow[c]    = this._sampleRingSmooth(this.bufLow, mirrorAge, halfWinSlices);
-                    this._colMid[c]    = this._sampleRingSmooth(this.bufMid, mirrorAge, halfWinSlices);
-                    this._colHigh[c]   = this._sampleRingSmooth(this.bufHigh, mirrorAge, halfWinSlices);
-                    this._colComp[c]   = this._sampleRingSmooth(this.bufComp, mirrorAge, halfWinSlices);
-                    this._colDetail[c] = this._sampleRingSmooth(this.bufDetail, mirrorAge, halfWinSlices);
-                    for (var sIdxM = 0; sIdxM < stemCount; sIdxM++) {
-                        var sDefM = stemDefs[sIdxM];
-                        var sBufM = this._bufByKey[sDefM.key];
-                        var sValM = this._sampleRingSmooth(sBufM, mirrorAge, halfWinSlices);
-                        if (sDefM.mixHats) {
-                            sValM = Math.min(1.0, sValM + 0.28 * this._sampleRingSmooth(this.bufHats, mirrorAge, halfWinSlices));
+                    var seamMirrorAge = (seamDx / pxPerSlice) + subSliceAge;
+                    var seamMirrorFade = this.params.forecastOpacity * 0.72 * Math.pow(1.0 - seamDistFrac, 0.7);
+                    var cMs = nCols++;
+                    this._colX[cMs] = playheadX + seamDx;
+                    this._colAbsId[cMs] = -1;
+                    this._colIsFuture[cMs] = 1;
+                    this._colAge[cMs] = seamDx / pxPerSlice;
+                    this._colSplit[cMs] = this._localSplit(seamDx / maxDist);
+                    this._colFade[cMs] = (seamMirrorAge < this.filledSlices - 1) ? seamMirrorFade : 0.0;
+                    this._colLow[cMs]    = this._sampleRingLinear3(this.bufLow, seamMirrorAge, halfWinSlices);
+                    this._colMid[cMs]    = this._sampleRingLinear3(this.bufMid, seamMirrorAge, halfWinSlices);
+                    this._colHigh[cMs]   = this._sampleRingLinear3(this.bufHigh, seamMirrorAge, halfWinSlices);
+                    this._colComp[cMs]   = this._sampleRingLinear3(this.bufComp, seamMirrorAge, halfWinSlices);
+                    this._colDetail[cMs] = this._sampleRingLinear3(this.bufDetail, seamMirrorAge, halfWinSlices);
+                    for (var sIdxMs = 0; sIdxMs < stemCount; sIdxMs++) {
+                        var sDefMs = stemDefs[sIdxMs];
+                        var sValMs = this._sampleRingLinear3(this._bufByKey[sDefMs.key], seamMirrorAge, halfWinSlices);
+                        if (sDefMs.mixHats) {
+                            sValMs = Math.min(1.0, sValMs + 0.28 * this._sampleRingLinear3(this.bufHats, seamMirrorAge, halfWinSlices));
                         }
-                        this._colStems[sIdxM][c] = sValM;
+                        this._colStems[sIdxMs][cMs] = sValMs;
+                    }
+
+                    // Mirror lattice stepping downward through committed past slices (moving rightward)
+                    var rightMirrorMinAbs = livePlayheadAbs - (rightSpan + stride * pxPerSlice) / pxPerSlice;
+                    var kMinMirror = Math.ceil(Math.max(minValidId + tapSpan, rightMirrorMinAbs) / stride) * stride;
+                    var kMaxMirror = Math.floor(maxLiveAbs / stride) * stride;
+                    for (var idM = kMaxMirror; idM >= kMinMirror && nCols < this._maxCols - 2; idM -= stride) {
+                        var dxM = (livePlayheadAbs - idM) * pxPerSlice;
+                        if (dxM <= 0.6) continue;
+                        if (dxM > rightSpan + stride * pxPerSlice) break;
+                        var dfM = this._clamp(dxM / rightSpan, 0, 1);
+                        var mFade = this.params.forecastOpacity * 0.72 * Math.pow(1.0 - dfM, 0.7);
+                        var cM = nCols++;
+                        this._colX[cM] = playheadX + dxM;
+                        this._colAbsId[cM] = idM;
+                        this._colIsFuture[cM] = 1;
+                        this._colAge[cM] = dxM / pxPerSlice;
+                        this._colSplit[cM] = this._localSplit(dxM / maxDist);
+                        this._colFade[cM] = mFade;
+                        this._colLow[cM]    = this._sampleAbsFixed(this.bufLow, idM, tapSpan);
+                        this._colMid[cM]    = this._sampleAbsFixed(this.bufMid, idM, tapSpan);
+                        this._colHigh[cM]   = this._sampleAbsFixed(this.bufHigh, idM, tapSpan);
+                        this._colComp[cM]   = this._sampleAbsFixed(this.bufComp, idM, tapSpan);
+                        this._colDetail[cM] = this._sampleAbsFixed(this.bufDetail, idM, tapSpan);
+                        for (var sIdxM = 0; sIdxM < stemCount; sIdxM++) {
+                            var sDefM = stemDefs[sIdxM];
+                            var sValM = this._sampleAbsFixed(this._bufByKey[sDefM.key], idM, tapSpan);
+                            if (sDefM.mixHats) {
+                                sValM = Math.min(1.0, sValM + 0.28 * this._sampleAbsFixed(this.bufHats, idM, tapSpan));
+                            }
+                            this._colStems[sIdxM][cM] = sValM;
+                        }
                     }
                 } else {
-                    var fFade = forecastReady * this.params.forecastOpacity * Math.pow(1.0 - distFrac, 0.75);
-                    this._colFade[c] = fFade;
-                    if (fFade > 0.01) {
-                        var fSlicesAdj = Math.max(0, futureSlices - subSliceAge);
-                        this._colLow[c]    = this._sampleForecastSmooth(this.bufLow, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colMid[c]    = this._sampleForecastSmooth(this.bufMid, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colHigh[c]   = this._sampleForecastSmooth(this.bufHigh, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colComp[c]   = this._sampleForecastSmooth(this.bufComp, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colDetail[c] = this._sampleForecastSmooth(this.bufDetail, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        for (var sIdxF = 0; sIdxF < stemCount; sIdxF++) {
-                            var sDefF = stemDefs[sIdxF];
-                            var sBufF = this._bufByKey[sDefF.key];
-                            var sValF = this._sampleForecastSmooth(sBufF, fSlicesAdj, slicesPerBar, halfWinSlices);
-                            if (sDefF.mixHats) {
-                                sValF = Math.min(1.0, sValF + 0.28 * this._sampleForecastSmooth(this.bufHats, fSlicesAdj, slicesPerBar, halfWinSlices));
+                    // Forecast right seam at playheadX + 0.5
+                    var seamFutFade = forecastReady * this.params.forecastOpacity * Math.pow(1.0 - seamDistFrac, 0.75);
+                    var fAbsSeam = livePlayheadAbs + seamDx / pxPerSlice;
+                    var cFs = nCols++;
+                    this._colX[cFs] = playheadX + seamDx;
+                    this._colAbsId[cFs] = -1;
+                    this._colIsFuture[cFs] = 1;
+                    this._colAge[cFs] = seamDx / pxPerSlice;
+                    this._colSplit[cFs] = this._localSplit(seamDx / maxDist);
+                    this._colFade[cFs] = seamFutFade;
+                    if (seamFutFade > 0.01) {
+                        this._colLow[cFs]    = this._sampleForecastAbs(this.bufLow, fAbsSeam, slicesPerBar, tapSpan);
+                        this._colMid[cFs]    = this._sampleForecastAbs(this.bufMid, fAbsSeam, slicesPerBar, tapSpan);
+                        this._colHigh[cFs]   = this._sampleForecastAbs(this.bufHigh, fAbsSeam, slicesPerBar, tapSpan);
+                        this._colComp[cFs]   = this._sampleForecastAbs(this.bufComp, fAbsSeam, slicesPerBar, tapSpan);
+                        this._colDetail[cFs] = this._sampleForecastAbs(this.bufDetail, fAbsSeam, slicesPerBar, tapSpan);
+                        for (var sIdxFs = 0; sIdxFs < stemCount; sIdxFs++) {
+                            var sDefFs = stemDefs[sIdxFs];
+                            var sValFs = this._sampleForecastAbs(this._bufByKey[sDefFs.key], fAbsSeam, slicesPerBar, tapSpan);
+                            if (sDefFs.mixHats) {
+                                sValFs = Math.min(1.0, sValFs + 0.28 * this._sampleForecastAbs(this.bufHats, fAbsSeam, slicesPerBar, tapSpan));
                             }
-                            this._colStems[sIdxF][c] = sValF;
+                            this._colStems[sIdxFs][cFs] = sValFs;
                         }
                     } else {
-                        this._colLow[c] = this._colMid[c] = this._colHigh[c] = this._colComp[c] = this._colDetail[c] = 0;
-                        for (var sIdxZ = 0; sIdxZ < stemCount; sIdxZ++) this._colStems[sIdxZ][c] = 0;
+                        this._colLow[cFs] = this._colMid[cFs] = this._colHigh[cFs] = this._colComp[cFs] = this._colDetail[cFs] = 0;
+                        for (var sIdxFz = 0; sIdxFz < stemCount; sIdxFz++) this._colStems[sIdxFz][cFs] = 0;
                     }
+
+                    // Sample-locked future forecast lattice (futureId % stride === 0)
+                    var kStartFut = Math.ceil((livePlayheadAbs + 0.6 / pxPerSlice) / stride) * stride;
+                    var futMaxAbs = livePlayheadAbs + (rightSpan + stride * pxPerSlice) / pxPerSlice;
+                    for (var idF = kStartFut; idF <= futMaxAbs && nCols < this._maxCols - 2; idF += stride) {
+                        var dxF = (idF - livePlayheadAbs) * pxPerSlice;
+                        if (dxF <= 0.55) continue;
+                        var dfF = this._clamp(dxF / rightSpan, 0, 1);
+                        var fFade = forecastReady * this.params.forecastOpacity * Math.pow(1.0 - dfF, 0.75);
+                        var cF = nCols++;
+                        this._colX[cF] = playheadX + dxF;
+                        this._colAbsId[cF] = idF;
+                        this._colIsFuture[cF] = 1;
+                        this._colAge[cF] = dxF / pxPerSlice;
+                        this._colSplit[cF] = this._localSplit(dxF / maxDist);
+                        this._colFade[cF] = fFade;
+                        if (fFade > 0.01) {
+                            this._colLow[cF]    = this._sampleForecastAbs(this.bufLow, idF, slicesPerBar, tapSpan);
+                            this._colMid[cF]    = this._sampleForecastAbs(this.bufMid, idF, slicesPerBar, tapSpan);
+                            this._colHigh[cF]   = this._sampleForecastAbs(this.bufHigh, idF, slicesPerBar, tapSpan);
+                            this._colComp[cF]   = this._sampleForecastAbs(this.bufComp, idF, slicesPerBar, tapSpan);
+                            this._colDetail[cF] = this._sampleForecastAbs(this.bufDetail, idF, slicesPerBar, tapSpan);
+                            for (var sIdxF = 0; sIdxF < stemCount; sIdxF++) {
+                                var sDefF = stemDefs[sIdxF];
+                                var sValF = this._sampleForecastAbs(this._bufByKey[sDefF.key], idF, slicesPerBar, tapSpan);
+                                if (sDefF.mixHats) {
+                                    sValF = Math.min(1.0, sValF + 0.28 * this._sampleForecastAbs(this.bufHats, idF, slicesPerBar, tapSpan));
+                                }
+                                this._colStems[sIdxF][cF] = sValF;
+                            }
+                        } else {
+                            this._colLow[cF] = this._colMid[cF] = this._colHigh[cF] = this._colComp[cF] = this._colDetail[cF] = 0;
+                            for (var sIdxZ = 0; sIdxZ < stemCount; sIdxZ++) this._colStems[sIdxZ][cF] = 0;
+                        }
+                    }
+                }
+
+                // Right screen edge endpoint if grid ended before canvas right edge
+                if (this._colX[nCols - 1] < width - 0.5 && nCols < this._maxCols) {
+                    emitZeroCol(width, 1);
                 }
             }
         }
+
+        this._lastNCols = nCols;
 
         // Determine visibility bounds for unified vs split layers
         var maxSplit = 0, minSplit = 1;
@@ -751,7 +934,7 @@ class StemWaveformScene {
         // 6. Unified Waveform Layer
         if (minSplit < 0.98) {
             this._drawUnifiedLayer(
-                ctx, nCols, colStep, centerY, unifiedMaxH, gainScale, pal
+                ctx, nCols, stride, centerY, unifiedMaxH, gainScale, pal
             );
         }
 
@@ -765,7 +948,7 @@ class StemWaveformScene {
         // 8. Separated Stem Staves (drawn back-to-front top -> bottom)
         if (maxSplit > 0.02) {
             this._drawStemStaves(
-                ctx, width, height, nCols, colStep, topY, usableH, centerY,
+                ctx, width, height, nCols, stride, topY, usableH, centerY,
                 stemMaxH, gainScale, stemDefs, pal, aud
             );
         }
@@ -923,7 +1106,7 @@ class StemWaveformScene {
         ctx.restore();
     }
 
-    _drawUnifiedLayer(ctx, nCols, colStep, centerY, maxH, gainScale, pal) {
+    _drawUnifiedLayer(ctx, nCols, stride, centerY, maxH, gainScale, pal) {
         var style = this.params.waveStyle;
         var glowAmt = this.params.glow;
         var ptTop = { x: 0, y: 0, s: 1 };
@@ -942,7 +1125,7 @@ class StemWaveformScene {
                     endC = c;
                 }
                 if (endC - startC >= 1) {
-                    this._drawSeratoUnifiedPass(ctx, startC, endC, wantFuture, centerY, maxH, gainScale, glowAmt);
+                    this._drawSeratoUnifiedPass(ctx, startC, endC, wantFuture, centerY, maxH, gainScale, glowAmt, stride);
                 }
             }
 
@@ -987,7 +1170,7 @@ class StemWaveformScene {
         this._drawUnifiedNeonContour(ctx, nCols, centerY, maxH, gainScale, "0, 240, 255", "255, 51, 145", glowAmt);
     }
 
-    _drawSeratoUnifiedPass(ctx, startC, endC, wantFuture, centerY, maxH, gainScale, glowAmt) {
+    _drawSeratoUnifiedPass(ctx, startC, endC, wantFuture, centerY, maxH, gainScale, glowAmt, stride) {
         var pt = { x: 0, y: 0, s: 1 };
         this._project(this._colX[startC], centerY, 0, pt);
         var gx0 = pt.x;
@@ -1000,11 +1183,15 @@ class StemWaveformScene {
         var coreGrad = ctx.createLinearGradient(gx0, 0, gx1, 0);
         var haloGrad = (!wantFuture && glowAmt > 0.05) ? ctx.createLinearGradient(gx0, 0, gx1, 0) : null;
 
-        var numStops = wantFuture ? 44 : 72;
+        var colorStepCols = wantFuture ? 4 : 3;
+        var colorMod = Math.max(1, stride || 1) * colorStepCols;
         var lastT = 0.0;
-        for (var st = 0; st < numStops; st++) {
-            var u = st / (numStops - 1);
-            var colIdx = Math.round(startC + u * (endC - startC));
+        for (var colIdx = startC; colIdx <= endC; colIdx++) {
+            var cid = this._colAbsId[colIdx];
+            var isEndpoint = (colIdx === startC || colIdx === endC);
+            if (!isEndpoint && !(cid >= 0 && (Math.round(cid) % colorMod === 0))) {
+                continue;
+            }
             var cA = Math.max(startC, colIdx - 1);
             var cB = Math.min(endC, colIdx + 1);
             var low = 0, mid = 0, high = 0, fade = 0, ampAcc = 0, cnt = 0;
@@ -1082,6 +1269,8 @@ class StemWaveformScene {
         ctx.save();
         ctx.strokeStyle = strokeStyle;
         ctx.lineWidth = 1.0;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
         ctx.setLineDash([4, 3]);
         ctx.beginPath();
         for (var c = 0; c < nCols; c++) {
@@ -1428,6 +1617,8 @@ class StemWaveformScene {
         ctx.save();
         ctx.strokeStyle = strokeStyle;
         ctx.lineWidth = lw || 1.1;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
         if (dashed) ctx.setLineDash([4, 3]);
         for (var dir = -1; dir <= 1; dir += 2) {
             ctx.beginPath();
