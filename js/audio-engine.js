@@ -15,11 +15,18 @@ class AudioEngine {
         this.frequencyData = null;
         this.timeDomainData = null;
 
-        // Configuration
+        // Configuration & Always-On Auto-Detection State
         this.sensitivity = 1.2;
         this.smoothing = 0.82;
         this.isListening = false;
         this.useSimulation = true;
+        this.audioSourceState = 'connecting'; // 'connecting' | 'live_music' | 'sim_no_signal' | 'sim_no_mic'
+        this.audioStatusReason = 'Connecting to audio input...';
+        this.micPermissionError = null;       // null | 'denied' | 'no_device' | 'gesture_needed' | 'unsupported' | 'error'
+        this.liveSignalLevel = 0;             // 0..1 instantaneous mic signal meter
+        this._signalDetectTimer = 0;
+        this._silenceTimer = 0;
+        this.audioSourceCallbacks = [];
 
         // Extracted Band Energy (0.0 to 1.0 smoothed)
         this.sub = 0;      // 20 - 80 Hz
@@ -97,7 +104,7 @@ class AudioEngine {
         this._inputChannelCount = 2;
 
         this._hpssBands = 64;
-        this._hpssFrames = 12;
+        this._hpssFrames = 24;
         this._hpssHistory = new Float32Array(this._hpssBands * this._hpssFrames);
         this._hpssWriteIdx = 0;
         this._hpssFilled = 0;
@@ -106,13 +113,17 @@ class AudioEngine {
         this._hpssTemporal = new Float32Array(this._hpssBands);
         this._hpssHarm = new Float32Array(this._hpssBands);
         this._hpssPerc = new Float32Array(this._hpssBands);
+        this._hpssMod = new Float32Array(this._hpssBands);
+        this._bandMidDom = new Float32Array(this._hpssBands);
         this._hpssSortTmp = new Float32Array(this._hpssFrames);
+        this._vocalGateSmooth = 0;
 
         this.stems = {
             drums: 0,
             bass: 0,
             vocals: 0,
             synths: 0,
+            hats: 0,
             air: 0,
             low: 0,
             mid: 0,
@@ -126,6 +137,8 @@ class AudioEngine {
         const nyquist = (sampleRate || 44100) / 2;
         const binCount = this.stemFreqData ? this.stemFreqData.length : (this.stemFftSize / 2);
         const binHz = nyquist / binCount;
+        const msBinCount = this.midFreqData ? this.midFreqData.length : 256;
+        const msBinHz = nyquist / msBinCount;
         const fMin = 30;
         const fMax = Math.min(16000, nyquist * 0.96);
         const ranges = new Array(this._hpssBands);
@@ -134,7 +147,9 @@ class AudioEngine {
             const f1 = fMin * Math.pow(fMax / fMin, (b + 1) / this._hpssBands);
             const sBin = Math.max(1, Math.floor(f0 / binHz));
             const eBin = Math.min(binCount - 1, Math.max(sBin, Math.ceil(f1 / binHz)));
-            ranges[b] = { sBin, eBin, fc: Math.sqrt(f0 * f1) };
+            const msSBin = Math.max(1, Math.floor(f0 / msBinHz));
+            const msEBin = Math.min(msBinCount - 1, Math.max(msSBin, Math.ceil(f1 / msBinHz)));
+            ranges[b] = { sBin, eBin, msSBin, msEBin, fc: Math.sqrt(f0 * f1) };
         }
         this._hpssBandRanges = ranges;
     }
@@ -194,10 +209,38 @@ class AudioEngine {
         }
     }
 
+    onAudioSourceChange(callback) {
+        this.audioSourceCallbacks.push(callback);
+    }
+
+    _setAudioSourceState(newState, reason) {
+        if (reason) this.audioStatusReason = reason;
+        if (this.audioSourceState === newState) return;
+        const prev = this.audioSourceState;
+        this.audioSourceState = newState;
+        this.useSimulation = (newState !== 'live_music');
+        this.audioSourceCallbacks.forEach(cb => {
+            try { cb(newState, prev, this.audioStatusReason); } catch (e) { console.error("AudioSource callback error:", e); }
+        });
+    }
+
     async startAudioInput(deviceId = null) {
+        if (this.audioSourceState !== 'live_music') {
+            this._setAudioSourceState('connecting', 'Connecting to audio input...');
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            this.isListening = false;
+            this.micPermissionError = 'unsupported';
+            this._setAudioSourceState('sim_no_mic', 'Microphone API unavailable — using Sim Beat');
+            return false;
+        }
+
         if (!this.audioCtx) await this.init();
-        if (this.audioCtx.state === 'suspended') {
-            await this.audioCtx.resume();
+        if (this.audioCtx && this.audioCtx.state === 'suspended') {
+            try {
+                await this.audioCtx.resume();
+            } catch (_) {}
         }
 
         try {
@@ -236,14 +279,35 @@ class AudioEngine {
             this.hasStereo = chCount >= 2;
             this.stereoConfidence = 0;
 
+            this._signalDetectTimer = 0;
+            this._silenceTimer = 0;
+            this.micPermissionError = null;
             this.isListening = true;
-            this.useSimulation = false;
-            console.log("Audio input connected successfully.");
+
+            if (this.audioCtx && this.audioCtx.state === 'suspended') {
+                this.micPermissionError = 'gesture_needed';
+                this._setAudioSourceState('sim_no_mic', 'Click anywhere to enable live mic (Sim Beat)');
+                return false;
+            }
+
+            this._setAudioSourceState('sim_no_signal', 'Listening — no music detected (Sim Beat)');
+            console.log("Audio input connected — monitoring for live music.");
             return true;
         } catch (err) {
+            const errName = (err && err.name) ? err.name : '';
+            let reason = 'Audio input unavailable — using Sim Beat';
+            if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+                this.micPermissionError = 'denied';
+                reason = 'Mic permission blocked — using Sim Beat';
+            } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+                this.micPermissionError = 'no_device';
+                reason = 'No microphone found — using Sim Beat';
+            } else {
+                this.micPermissionError = 'error';
+            }
             console.warn("Unable to capture audio input, falling back to simulated beat:", err);
             this.isListening = false;
-            this.useSimulation = true;
+            this._setAudioSourceState('sim_no_mic', reason);
             return false;
         }
     }
@@ -260,6 +324,8 @@ class AudioEngine {
         this.isListening = false;
         this.hasStereo = false;
         this.stereoConfidence = 0;
+        this.liveSignalLevel = 0;
+        this._setAudioSourceState('sim_no_mic', 'Audio input stopped — using Sim Beat');
     }
 
     async getAudioInputDevices() {
@@ -403,16 +469,20 @@ class AudioEngine {
             this._hpssCurrent[b] = Math.min(1.25, bVal);
         }
 
-        // Write current frame into HPSS ring buffer
+        // Write current frame into 24-frame HPSS ring buffer
+        const nFrames = this._hpssFrames;
         const writeOffset = this._hpssWriteIdx * nBands;
         this._hpssHistory.set(this._hpssCurrent, writeOffset);
-        this._hpssWriteIdx = (this._hpssWriteIdx + 1) % this._hpssFrames;
-        if (this._hpssFilled < this._hpssFrames) this._hpssFilled++;
+        const justWrittenIdx = this._hpssWriteIdx;
+        this._hpssWriteIdx = (this._hpssWriteIdx + 1) % nFrames;
+        if (this._hpssFilled < nFrames) this._hpssFilled++;
 
-        // Causal temporal median vs spectral neighborhood for Harmonic/Percussive masks
+        // Causal temporal median, syllabic/vibrato modulation & Harmonic/Percussive masks
         const filled = this._hpssFilled;
         const tmp = this._hpssSortTmp;
         const medIdx = Math.floor((filled - 1) * 0.45);
+        const modHalf = Math.min(5, Math.max(1, Math.floor(filled / 2)));
+
         for (let b = 0; b < nBands; b++) {
             for (let f = 0; f < filled; f++) {
                 const val = this._hpssHistory[f * nBands + b];
@@ -425,6 +495,22 @@ class AudioEngine {
             }
             const Tb = tmp[medIdx];
             this._hpssTemporal[b] = Tb;
+
+            // Syllabic / vibrato temporal modulation amplitude (3-9 Hz harmonic contour)
+            let modAmp = 0;
+            if (filled >= 4) {
+                let sumNew = 0, sumOld = 0;
+                for (let f = 0; f < modHalf; f++) {
+                    const iNew = (justWrittenIdx - f + nFrames * 2) % nFrames;
+                    const iOld = (justWrittenIdx - modHalf - f + nFrames * 2) % nFrames;
+                    sumNew += this._hpssHistory[iNew * nBands + b];
+                    sumOld += this._hpssHistory[iOld * nBands + b];
+                }
+                const avgNew = sumNew / modHalf;
+                const avgOld = sumOld / modHalf;
+                modAmp = Math.abs(avgNew - avgOld) / (0.5 * (avgNew + avgOld) + 0.03);
+            }
+            this._hpssMod[b] = Math.min(1.5, modAmp);
 
             const j0 = Math.max(0, b - 3);
             const j1 = Math.min(nBands - 1, b + 3);
@@ -442,115 +528,132 @@ class AudioEngine {
             this._hpssHarm[b] = Math.min(Eb, Tb * 1.15) * (0.35 + 0.65 * mHarm) + 0.2 * Eb * mHarm;
         }
 
-        // Optional stereo Mid/Side weighting for Vocal (center) vs Synth (wide) separation
-        let vocalMidWeight = 1.0;
-        let synthSideWeight = 1.0;
+        // Per-band & global stereo Mid/Side confidence weighting
+        this._bandMidDom.fill(0.5);
         if (this.analyserMid && this.analyserSide && this.midFreqData && this.sideFreqData && this._inputChannelCount >= 2) {
             this.analyserMid.getByteFrequencyData(this.midFreqData);
             this.analyserSide.getByteFrequencyData(this.sideFreqData);
 
             const msBinHz = (sampleRate * 0.5) / this.midFreqData.length;
             let midTotal = 0, sideTotal = 0;
-            let midVocal = 0, sideVocal = 0;
-            let midSynth = 0, sideSynth = 0;
             const bStart = Math.max(1, Math.floor(200 / msBinHz));
             const bEnd = Math.min(this.midFreqData.length - 1, Math.ceil(5500 / msBinHz));
             for (let i = bStart; i <= bEnd; i++) {
-                const fHz = i * msBinHz;
-                const m = this.midFreqData[i] / 255;
-                const s = this.sideFreqData[i] / 255;
-                midTotal += m;
-                sideTotal += s;
-                if (fHz >= 260 && fHz <= 3200) {
-                    midVocal += m;
-                    sideVocal += s;
-                }
-                if (fHz >= 180 && fHz <= 5500) {
-                    midSynth += m;
-                    sideSynth += s;
-                }
+                midTotal += this.midFreqData[i] / 255;
+                sideTotal += this.sideFreqData[i] / 255;
             }
             const diffRatio = Math.abs(midTotal - sideTotal) / (midTotal + sideTotal + 1e-4);
             const sideRatio = sideTotal / (midTotal + 1e-4);
-            const isStereoFrame = (diffRatio > 0.08 && sideRatio > 0.04 && sideRatio < 0.92);
+            const isStereoFrame = (diffRatio > 0.06 && sideRatio > 0.04 && sideRatio < 2.2);
             this.stereoConfidence += ((isStereoFrame ? 1.0 : 0.0) - this.stereoConfidence) * Math.min(1.0, dt * 3.0);
             this.hasStereo = this.stereoConfidence > 0.35;
 
-            if (this.stereoConfidence > 0.05) {
-                const vMidDom = midVocal / (midVocal + sideVocal + 1e-4);
-                const sSideDom = sideSynth / (midSynth + sideSynth + 1e-4);
-                vocalMidWeight = 1.0 + this.stereoConfidence * ((vMidDom - 0.5) * 1.1);
-                synthSideWeight = 1.0 + this.stereoConfidence * ((sSideDom - 0.25) * 1.6);
-                vocalMidWeight = Math.max(0.45, Math.min(1.5, vocalMidWeight));
-                synthSideWeight = Math.max(0.45, Math.min(1.5, synthSideWeight));
+            for (let b = 0; b < nBands; b++) {
+                const r = ranges[b];
+                let mE = 0, sE = 0;
+                for (let k = r.msSBin; k <= r.msEBin; k++) {
+                    mE += this.midFreqData[k];
+                    sE += this.sideFreqData[k];
+                }
+                this._bandMidDom[b] = (mE + sE > 1) ? (mE / (mE + sE + 1e-4)) : 0.5;
             }
+        } else {
+            this.stereoConfidence *= Math.exp(-dt * 4.0);
+            this.hasStereo = false;
         }
 
-        // Aggregate 5 stems from HPSS + frequency masks + Mid/Side bias
+        // Competitive Exclusive Partitioning across 5 stems:
+        // Drums (low-mid transients) | Bass (sustained lows) | Vocals (formant/mod/center) | Synths (pads/leads) | Hi-Hats (highs)
         let kickPerc = 0, kickCnt = 0;
         let snarePerc = 0, snareCnt = 0;
-        let hatPerc = 0, hatCnt = 0;
         let bassAcc = 0, bassCnt = 0;
-        let vocalAcc = 0, vocalCnt = 0;
-        let synthAcc = 0, synthCnt = 0;
-        let airAcc = 0, airCnt = 0;
+        let vocalAcc = 0, vocalMidBandCnt = 0;
+        let synthAcc = 0, synthBandCnt = 0;
+        let hatAcc = 0, hatCnt = 0;
 
+        const stereoConf = this.stereoConfidence;
         for (let b = 0; b < nBands; b++) {
             const fc = ranges[b].fc;
             const Eb = this._hpssCurrent[b];
             const Pb = this._hpssPerc[b];
             const Hb = this._hpssHarm[b];
+            const Modb = this._hpssMod[b];
+            const midDom = this._bandMidDom[b];
 
-            if (fc >= 40 && fc <= 160) { kickPerc += Pb; kickCnt++; }
-            if (fc >= 180 && fc <= 2400) { snarePerc += Pb; snareCnt++; }
-            if (fc >= 3000 && fc <= 11000) { hatPerc += Pb; hatCnt++; }
+            if (fc >= 35 && fc <= 170) { kickPerc += Pb; kickCnt++; }
+            if (fc >= 180 && fc <= 2600) { snarePerc += Pb; snareCnt++; }
 
             if (fc >= 25 && fc <= 220) {
-                bassAcc += 0.65 * Hb + 0.35 * Eb;
+                bassAcc += 0.68 * Hb + 0.32 * Eb;
                 bassCnt++;
             }
 
-            if (fc >= 260 && fc <= 3200) {
-                const f0 = Math.max(0, b - 4);
-                const f1 = Math.min(nBands - 1, b + 4);
-                let localH = 0;
-                for (let j = f0; j <= f1; j++) localH += this._hpssHarm[j];
-                localH /= (f1 - f0 + 1);
-                const formantProm = Math.max(0, Hb - 0.75 * localH);
-                vocalAcc += (formantProm * 1.85 + Hb * 0.42);
-                vocalCnt++;
+            if (fc >= 180 && fc <= 6000) {
+                synthBandCnt++;
+                let pVocal = 0;
+                if (fc >= 260 && fc <= 3500) {
+                    vocalMidBandCnt++;
+                    const cUp = Math.min(1.0, Math.max(0.0, (fc - 260) / 190));
+                    const cDn = Math.min(1.0, Math.max(0.0, (3500 - fc) / 1100));
+                    const formantBell = cUp * cDn;
+
+                    const specVal = 0.65 * Hb + 0.35 * Eb;
+                    const f0 = Math.max(0, b - 5);
+                    const f1 = Math.min(nBands - 1, b + 5);
+                    let localSum = 0;
+                    for (let j = f0; j <= f1; j++) {
+                        localSum += 0.65 * this._hpssHarm[j] + 0.35 * this._hpssCurrent[j];
+                    }
+                    const localFloor = localSum / (f1 - f0 + 1);
+
+                    const promScore = Math.min(1.0, Math.max(0.0, ((specVal / (localFloor + 0.015)) - 1.18) * 1.85));
+                    const modScore = Math.min(1.0, Math.max(0.0, (Modb - 0.04) * 5.2));
+                    const sMono = formantBell * (0.60 * promScore + 0.40 * modScore);
+
+                    const stereoCue = Math.min(1.0, Math.max(0.0, (midDom - 0.46) * 3.8));
+                    const stereoPen = (midDom < 0.42) ? 0.25 : 1.0;
+                    const sStereo = formantBell * (0.42 * promScore + 0.26 * modScore + 0.32 * stereoCue) * stereoPen;
+
+                    const rawProb = sMono * (1.0 - stereoConf) + sStereo * stereoConf;
+                    const t = Math.min(1.0, Math.max(0.0, (rawProb - 0.14) / (0.46 - 0.14)));
+                    pVocal = t * t * (3.0 - 2.0 * t);
+                    vocalAcc += specVal * pVocal;
+                }
+                const stereoSideBoost = 1.0 + stereoConf * Math.max(0.0, 0.65 - midDom) * 1.4;
+                synthAcc += Hb * (1.0 - pVocal) * stereoSideBoost;
             }
 
-            if (fc >= 180 && fc <= 5500) {
-                // Warm harmonic body + chordal upper partials outside center vocal peaks
-                const upperBoost = (fc > 1800) ? 1.25 : 0.85;
-                synthAcc += Hb * upperBoost;
-                synthCnt++;
-            }
-
-            if (fc >= 4500 && fc <= 16000) {
-                airAcc += 0.55 * Eb + 0.45 * Pb;
-                airCnt++;
+            if (fc >= 4200 && fc <= 16000) {
+                hatAcc += 0.50 * Eb + 0.50 * Pb;
+                hatCnt++;
             }
         }
 
+        const vocalNorm = vocalMidBandCnt ? (vocalAcc / Math.max(4.0, vocalMidBandCnt * 0.28)) : 0;
+        const synthNorm = synthBandCnt ? (synthAcc / synthBandCnt) : 0;
+
+        // Frame-level Vocal Gate using density-normalized means so real vocals over lush synths aren't swamped
+        const vocalRatio = vocalNorm / (vocalNorm + synthNorm + 0.05);
+        const vocalGateTarget = Math.min(1.0, Math.max(0.0, (vocalRatio - 0.12) * 3.0));
+        this._vocalGateSmooth += (vocalGateTarget - this._vocalGateSmooth) * Math.min(1.0, dt * 10.0);
+
         const rawDrums = Math.min(1.0, (
-            (kickCnt ? kickPerc / kickCnt : 0) * 1.45 +
-            (snareCnt ? snarePerc / snareCnt : 0) * 1.25 +
-            (hatCnt ? hatPerc / hatCnt : 0) * 0.90 +
+            (kickCnt ? kickPerc / kickCnt : 0) * 1.55 +
+            (snareCnt ? snarePerc / snareCnt : 0) * 1.35 +
             Math.max(0, this.spectralFlux - 0.08) * 0.45
         ));
-        const rawBass = Math.min(1.0, (bassCnt ? bassAcc / bassCnt : 0) * 1.15);
-        const rawVocals = Math.min(1.0, (vocalCnt ? vocalAcc / vocalCnt : 0) * 1.30 * vocalMidWeight);
-        const rawSynths = Math.min(1.0, (synthCnt ? synthAcc / synthCnt : 0) * 1.25 * synthSideWeight);
-        const rawAir = Math.min(1.0, (airCnt ? airAcc / airCnt : 0) * 1.35);
+        const rawBass = Math.min(1.0, (bassCnt ? bassAcc / bassCnt : 0) * 1.18);
+        const rawVocals = Math.min(1.0, vocalNorm * 1.30 * this._vocalGateSmooth);
+        const rawSynths = Math.min(1.0, synthNorm * 1.35);
+        const rawHats = Math.min(1.0, (hatCnt ? hatAcc / hatCnt : 0) * 1.45);
 
         const s = this.stems;
         s.drums = this._smoothStem(s.drums, rawDrums, 0.82, 0.28);
         s.bass = this._smoothStem(s.bass, rawBass, 0.72, 0.22);
-        s.vocals = this._smoothStem(s.vocals, rawVocals, 0.65, 0.22);
-        s.synths = this._smoothStem(s.synths, rawSynths, 0.60, 0.20);
-        s.air = this._smoothStem(s.air, rawAir, 0.76, 0.26);
+        s.vocals = this._smoothStem(s.vocals, rawVocals, 0.68, 0.24);
+        s.synths = this._smoothStem(s.synths, rawSynths, 0.62, 0.20);
+        s.hats = this._smoothStem(s.hats, rawHats, 0.78, 0.28);
+        s.air = s.hats;
 
         s.low = this._smoothStem(s.low, rawLow, 0.78, 0.26);
         s.mid = this._smoothStem(s.mid, rawMid, 0.74, 0.24);
@@ -658,13 +761,14 @@ class AudioEngine {
         s.bass = this._smoothStem(s.bass, rawBass, 0.82, 0.30);
         s.vocals = this._smoothStem(s.vocals, rawVocals, 0.75, 0.28);
         s.synths = this._smoothStem(s.synths, rawSynths, 0.78, 0.30);
-        s.air = this._smoothStem(s.air, rawAir, 0.84, 0.34);
+        s.hats = this._smoothStem(s.hats, rawAir, 0.84, 0.34);
+        s.air = s.hats;
 
         const rawLow = Math.min(1.0, s.bass * 0.72 + s.drums * 0.42);
         const rawMid = Math.min(1.0, Math.max(s.vocals, s.synths) * 0.65 + (s.vocals + s.synths) * 0.28 + s.drums * 0.22);
-        const rawHigh = Math.min(1.0, s.air * 0.78 + s.drums * 0.28 + s.synths * 0.18);
+        const rawHigh = Math.min(1.0, s.hats * 0.78 + s.drums * 0.28 + s.synths * 0.18);
         const rawComp = Math.min(1.0, rawLow * 0.42 + rawMid * 0.38 + rawHigh * 0.28);
-        const rawDet = Math.min(1.0, s.air * 0.65 + s.drums * 0.35);
+        const rawDet = Math.min(1.0, s.hats * 0.65 + s.drums * 0.35);
 
         s.low = rawLow;
         s.mid = rawMid;
@@ -681,12 +785,54 @@ class AudioEngine {
         // Track continuous beat count & beat phase from BPM
         const beatInterval = 60 / Math.max(40, this.bpm);
 
+        // Always-On Live Signal Monitoring + Hysteresis Fallback to Sim Beat
         if (this.isListening && this.analyser) {
+            if (this.audioCtx && this.audioCtx.state === 'suspended') {
+                this.liveSignalLevel *= Math.exp(-dt * 4.0);
+                this.micPermissionError = 'gesture_needed';
+                this._setAudioSourceState('sim_no_mic', 'Click anywhere to enable live mic (Sim Beat)');
+            } else {
+                this.analyser.getByteTimeDomainData(this.timeDomainData);
+                let sumSqMic = 0, peakMic = 0;
+                for (let i = 0; i < this.timeDomainData.length; i++) {
+                    const v = (this.timeDomainData[i] - 128) / 128;
+                    sumSqMic += v * v;
+                    const av = v < 0 ? -v : v;
+                    if (av > peakMic) peakMic = av;
+                }
+                const rawMicRms = Math.sqrt(sumSqMic / this.timeDomainData.length);
+                this.liveSignalLevel = this.liveSignalLevel * 0.8 + Math.min(1.0, rawMicRms * 6.5) * 0.2;
+
+                const hasSignal = (rawMicRms > 0.011 || peakMic > 0.045);
+                const isSilent = (rawMicRms < 0.0055 && peakMic < 0.022);
+
+                if (hasSignal) {
+                    this._silenceTimer = 0;
+                    this._signalDetectTimer += dt;
+                    if (this.audioSourceState !== 'live_music' && this._signalDetectTimer >= 0.16) {
+                        const msg = this.hasStereo ? 'Live music detected (Stereo)' : 'Live music detected';
+                        this._setAudioSourceState('live_music', msg);
+                    }
+                } else if (isSilent) {
+                    this._signalDetectTimer = 0;
+                    this._silenceTimer += dt;
+                    if (this.audioSourceState === 'live_music' && this._silenceTimer >= 4.2) {
+                        this._setAudioSourceState('sim_no_signal', 'No music detected — using Sim Beat');
+                    } else if (this.audioSourceState === 'connecting' && this._silenceTimer >= 0.6) {
+                        this._setAudioSourceState('sim_no_signal', 'Listening — no music detected (Sim Beat)');
+                    }
+                }
+            }
+        } else {
+            this.liveSignalLevel *= Math.exp(-dt * 4.0);
+        }
+
+        if (this.isListening && this.analyser && this.audioSourceState === 'live_music') {
             this.totalBeats += dt / beatInterval;
             this.beatPhase = this.totalBeats % 1.0;
 
             this.analyser.getByteFrequencyData(this.frequencyData);
-            this.analyser.getByteTimeDomainData(this.timeDomainData);
+            // timeDomainData already populated cleanly above for this frame
 
             const sampleRate = this.audioCtx.sampleRate;
             const binSize = (sampleRate / 2) / this.frequencyData.length;

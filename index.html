@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4039</title>
+    <title>LiteStep VJ vers. 4040</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,7 +45,7 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4039</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4040</span></h1>
                     <div class="hud-scene-status">
                         <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
@@ -128,8 +128,9 @@
                     🪞 Mirror: Off
                 </button>
 
-                <button id="btn-audio-toggle" class="vj-btn" title="Toggle Live Mic / Line-in or Synthetic Beat">
-                    Audio: Sim Beat
+                <button id="audio-status-pill" class="vj-btn audio-status-pill state-connecting" title="Always listening for live music — falls back to Sim Beat when no audio is detected">
+                    <span class="audio-status-dot"></span>
+                    <span id="audio-status-text">Detecting Mic…</span>
                 </button>
 
                 <button id="btn-terrain" class="vj-btn" title="Click to cycle mountain or dancer outfit (M), Shift-Click or press N to toggle beat cadence">
@@ -1087,9 +1088,9 @@
                         <div style="display: flex; flex-direction: column; gap: 4px;">
                             <span class="section-label">Stems Separation Count</span>
                             <div class="segmented-control" id="stems-count-control">
-                                <button class="seg-btn" data-count="3">3 Stems</button>
-                                <button class="seg-btn active" data-count="4">4 Stems</button>
-                                <button class="seg-btn" data-count="5">5 Stems</button>
+                                <button class="seg-btn" data-count="3" title="3 Stems: Bass · Vocals/Synths · Drums/Hats">3 Stems</button>
+                                <button class="seg-btn active" data-count="4" title="4 Stems: Drums · Bass · Vocals · Synths">4 Stems</button>
+                                <button class="seg-btn" data-count="5" title="5 Stems: Drums · Bass · Vocals · Synths · Hi-Hats">5 Stems</button>
                             </div>
                         </div>
 

@@ -116,31 +116,40 @@ class VJController {
     _isWebGL(idx) { return idx === 1 || idx === 3 || idx === 4 || idx === 5; }
 
     /**
-     * Start live audio immediately and attach first-gesture auto-resume
+     * Always-on live audio detection with automatic Sim Beat fallback & reconnect.
      */
     activateLiveAudio() {
-        var btnMic = document.getElementById("btn-audio-toggle");
-        if (btnMic) {
-            btnMic.textContent = "Audio: Connecting...";
-            btnMic.classList.add("active");
-        }
+        var ae = window.audioEngine;
+        if (!ae) return;
 
         var tryStart = async () => {
-            var ok = await window.audioEngine.startAudioInput();
-            if (btnMic) {
-                btnMic.textContent = ok ? "Live Audio: ON" : "Audio: Sim Beat";
-                btnMic.classList.toggle("active", ok);
-            }
+            var ok = await ae.startAudioInput();
+            this.updateAudioStatusUI(ae);
             return ok;
         };
 
+        if (ae.onAudioSourceChange) {
+            ae.onAudioSourceChange((state, prev, reason) => {
+                this.updateAudioStatusUI(ae);
+                if (state === "live_music") {
+                    this.showToast("🎙️ Live music detected!");
+                } else if (state === "sim_no_signal" && prev === "live_music") {
+                    this.showToast("🔇 No music detected — using Sim Beat");
+                } else if (state === "sim_no_mic") {
+                    this.showToast("⚠️ " + reason);
+                }
+                this.broadcastRemoteState();
+            });
+        }
+
         // 1. Immediate attempt on page load
+        this.updateAudioStatusUI(ae);
         tryStart().catch(() => {});
 
-        // 2. Fallback on first user gesture anywhere on screen
+        // 2. Auto-unlock suspended AudioContext or retry mic on first user gesture
         var onFirstGesture = () => {
-            if (!window.audioEngine.isListening) {
-                tryStart();
+            if (!ae.isListening || (ae.audioCtx && ae.audioCtx.state === "suspended") || ae.audioSourceState === "sim_no_mic") {
+                tryStart().catch(() => {});
             }
             window.removeEventListener("click", onFirstGesture);
             window.removeEventListener("keydown", onFirstGesture);
@@ -149,6 +158,52 @@ class VJController {
         window.addEventListener("click", onFirstGesture);
         window.addEventListener("keydown", onFirstGesture);
         window.addEventListener("touchstart", onFirstGesture);
+
+        // 3. Auto-reconnect when an audio interface or microphone is plugged in
+        if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+            navigator.mediaDevices.addEventListener("devicechange", () => {
+                if (!ae.isListening || ae.audioSourceState === "sim_no_mic") {
+                    tryStart().catch(() => {});
+                }
+            });
+        }
+    }
+
+    updateAudioStatusUI(audio) {
+        var pill = document.getElementById("audio-status-pill");
+        var txt = document.getElementById("audio-status-text");
+        if (!pill || !audio) return;
+
+        var state = audio.audioSourceState || "connecting";
+        var label = "Detecting Mic…";
+        var cls = "vj-btn audio-status-pill state-connecting";
+
+        if (state === "live_music") {
+            cls = "vj-btn audio-status-pill state-live";
+            label = audio.hasStereo ? "Live Music (Stereo)" : "Live Music";
+        } else if (state === "sim_no_signal") {
+            cls = "vj-btn audio-status-pill state-sim-silent";
+            label = "No Music · Sim";
+        } else if (state === "sim_no_mic") {
+            cls = "vj-btn audio-status-pill state-sim-error";
+            label = (audio.micPermissionError === "gesture_needed") ? "Click for Mic · Sim" : "No Mic · Sim";
+        }
+
+        if (pill.className !== cls) pill.className = cls;
+        if (txt && txt.textContent !== label) txt.textContent = label;
+        if (audio.audioStatusReason && pill.title !== audio.audioStatusReason) {
+            pill.title = audio.audioStatusReason;
+        }
+    }
+
+    async toggleAudio() {
+        var ae = window.audioEngine;
+        if (!ae) return;
+        if (!ae.isListening || ae.audioSourceState === "sim_no_mic" || (ae.audioCtx && ae.audioCtx.state === "suspended")) {
+            await ae.startAudioInput();
+            this.updateAudioStatusUI(ae);
+        }
+        if (ae.audioStatusReason) this.showToast(ae.audioStatusReason);
     }
 
     handleResize() {
@@ -412,7 +467,7 @@ class VJController {
             blackout: this.blackout,
             sceneLock: !this.autoCycleEnabled,
             bpm: window.audioEngine ? window.audioEngine.bpm : 126,
-            audioLive: window.audioEngine ? window.audioEngine.isListening : false,
+            audioLive: window.audioEngine ? (window.audioEngine.audioSourceState === "live_music") : false,
             sensitivity: window.audioEngine ? window.audioEngine.sensitivity : 1.0,
             formation: dancer ? dancer.formation : "1",
             speed: dancer ? dancer.speedScale : 1.0,
@@ -605,21 +660,12 @@ class VJController {
             });
         }
 
-        // Audio toggle
-        var btnMic = document.getElementById("btn-audio-toggle");
-        if (btnMic) {
-            btnMic.addEventListener("click", async (e) => {
+        // Always-On Audio Status Pill (retry mic/context on click if blocked, or report detection status)
+        var pillAudio = document.getElementById("audio-status-pill");
+        if (pillAudio) {
+            pillAudio.addEventListener("click", async (e) => {
                 e.stopPropagation();
-                if (!window.audioEngine.isListening) {
-                    var ok = await window.audioEngine.startAudioInput();
-                    btnMic.textContent = ok ? "Live Audio: ON" : "Audio: Sim Beat";
-                    btnMic.classList.toggle("active", ok);
-                } else {
-                    window.audioEngine.stopAudioInput();
-                    window.audioEngine.useSimulation = true;
-                    btnMic.textContent = "Audio: Sim Beat";
-                    btnMic.classList.remove("active");
-                }
+                await this.toggleAudio();
             });
         }
 
@@ -2730,6 +2776,11 @@ class VJController {
             if (mc.sceneName.textContent !== curName) {
                 mc.sceneName.textContent = curName;
             }
+        }
+
+        if (audio && (!this._lastAudioUiSync || (performance.now() - this._lastAudioUiSync > 250))) {
+            this._lastAudioUiSync = performance.now();
+            this.updateAudioStatusUI(audio);
         }
     }
 }

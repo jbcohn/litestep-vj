@@ -57,7 +57,7 @@ class StemWaveformScene {
         this.bufBass    = new Float32Array(this.MAX_HISTORY);
         this.bufVocals  = new Float32Array(this.MAX_HISTORY);
         this.bufSynths  = new Float32Array(this.MAX_HISTORY);
-        this.bufAir     = new Float32Array(this.MAX_HISTORY);
+        this.bufHats    = new Float32Array(this.MAX_HISTORY);
         this.bufLow     = new Float32Array(this.MAX_HISTORY);
         this.bufMid     = new Float32Array(this.MAX_HISTORY);
         this.bufHigh    = new Float32Array(this.MAX_HISTORY);
@@ -71,7 +71,8 @@ class StemWaveformScene {
             bass: this.bufBass,
             vocals: this.bufVocals,
             synths: this.bufSynths,
-            air: this.bufAir,
+            hats: this.bufHats,
+            air: this.bufHats,
             low: this.bufLow,
             mid: this.bufMid,
             high: this.bufHigh,
@@ -85,7 +86,7 @@ class StemWaveformScene {
         this._prevBeatCount = 0;
         this._pendingBeatHit = 0;
         this._prevStems = {
-            drums: 0, bass: 0, vocals: 0, synths: 0, air: 0,
+            drums: 0, bass: 0, vocals: 0, synths: 0, hats: 0,
             low: 0, mid: 0, high: 0, composite: 0, detail: 0
         };
 
@@ -147,19 +148,20 @@ class StemWaveformScene {
     _getStemDefinitions(count) {
         if (count === 3) {
             return [
-                { key: "low",  label: "LOWS / BASS",  colorIdx: 1 },
-                { key: "mid",  label: "MIDS / VOCAL", colorIdx: 2 },
-                { key: "high", label: "HIGHS / PERC", colorIdx: 3 }
+                { key: "low",  label: "BASS",            colorIdx: 1 },
+                { key: "mid",  label: "VOCALS / SYNTHS", colorIdx: 2 },
+                { key: "high", label: "DRUMS / HATS",    colorIdx: 0 }
             ];
         }
+        var is5 = (count >= 5);
         var list = [
-            { key: "drums",  label: "DRUMS",  colorIdx: 0 },
+            { key: "drums",  label: "DRUMS",  colorIdx: 0, mixHats: !is5 },
             { key: "bass",   label: "BASS",   colorIdx: 1 },
             { key: "vocals", label: "VOCALS", colorIdx: 2 },
             { key: "synths", label: "SYNTHS", colorIdx: 3 }
         ];
-        if (count >= 5) {
-            list.push({ key: "air", label: "AIR / FX", colorIdx: 4 });
+        if (is5) {
+            list.push({ key: "hats", label: "HI-HATS", colorIdx: 4 });
         }
         return list;
     }
@@ -304,7 +306,7 @@ class StemWaveformScene {
         this.bufBass[idx]    = s.bass;
         this.bufVocals[idx]  = s.vocals;
         this.bufSynths[idx]  = s.synths;
-        this.bufAir[idx]     = s.air;
+        this.bufHats[idx]    = s.hats;
         this.bufLow[idx]     = s.low;
         this.bufMid[idx]     = s.mid;
         this.bufHigh[idx]    = s.high;
@@ -341,7 +343,7 @@ class StemWaveformScene {
             bass: st.bass || 0,
             vocals: st.vocals || 0,
             synths: st.synths || 0,
-            air: st.air || 0,
+            hats: (st.hats !== undefined ? st.hats : (st.air || 0)),
             low: st.low || 0,
             mid: st.mid || 0,
             high: st.high || 0,
@@ -371,7 +373,7 @@ class StemWaveformScene {
                     bass:      prev.bass      + (currStems.bass      - prev.bass)      * u,
                     vocals:    prev.vocals    + (currStems.vocals    - prev.vocals)    * u,
                     synths:    prev.synths    + (currStems.synths    - prev.synths)    * u,
-                    air:       prev.air       + (currStems.air       - prev.air)       * u,
+                    hats:      prev.hats      + (currStems.hats      - prev.hats)      * u,
                     low:       prev.low       + (currStems.low       - prev.low)       * u,
                     mid:       prev.mid       + (currStems.mid       - prev.mid)       * u,
                     high:      prev.high      + (currStems.high      - prev.high)      * u,
@@ -479,47 +481,50 @@ class StemWaveformScene {
         return this._smoothstep(sa);
     }
 
-    _sampleRingPeak(buf, centerAge, halfWidthSlices) {
+    _readRingLinear(buf, age) {
         var filled = this.filledSlices;
-        if (filled <= 1 || centerAge < 0 || centerAge >= filled - 1) return 0.0;
-        var span = Math.max(0.5, halfWidthSlices);
-        var iStart = Math.max(0, Math.floor(centerAge - span));
-        var iEnd = Math.min(filled - 1, Math.ceil(centerAge + span));
-        var maxV = 0.0;
-        var sumV = 0.0;
-        var count = 0;
+        if (filled <= 1 || age < 0 || age >= filled - 1) return 0.0;
+        var a0 = Math.floor(age);
+        var a1 = Math.min(filled - 1, a0 + 1);
+        var f = age - a0;
         var write = this.writeIdx;
         var maxH = this.MAX_HISTORY;
-        for (var a = iStart; a <= iEnd; a++) {
-            var idx = (write - 1 - a + maxH * 2) % maxH;
-            var v = buf[idx];
-            if (v > maxV) maxV = v;
-            sumV += v;
-            count++;
-        }
-        if (count === 0) return 0.0;
-        return 0.45 * (sumV / count) + 0.55 * maxV;
+        var idx0 = (write - 1 - a0 + maxH * 2) % maxH;
+        var idx1 = (write - 1 - a1 + maxH * 2) % maxH;
+        return buf[idx0] * (1.0 - f) + buf[idx1] * f;
     }
 
-    _sampleForecastPeak(buf, futureSlices, slicesPerBar, halfWidthSlices) {
+    _sampleRingSmooth(buf, centerAge, halfWidthSlices) {
+        var filled = this.filledSlices;
+        if (filled <= 1 || centerAge < 0 || centerAge >= filled - 1) return 0.0;
+        var span = Math.max(0.4, halfWidthSlices);
+        var vL = this._readRingLinear(buf, Math.max(0.0, centerAge - span * 0.65));
+        var vC = this._readRingLinear(buf, centerAge);
+        var vR = this._readRingLinear(buf, Math.min(filled - 1.001, centerAge + span * 0.65));
+        var wMean = 0.25 * vL + 0.50 * vC + 0.25 * vR;
+        var vMax = vL > vC ? (vL > vR ? vL : vR) : (vC > vR ? vC : vR);
+        return 0.62 * wMean + 0.38 * vMax;
+    }
+
+    _sampleForecastSmooth(buf, futureSlices, slicesPerBar, halfWidthSlices) {
         var filled = this.filledSlices;
         var s1Bar = Math.max(24, slicesPerBar);
         var back1 = s1Bar - (futureSlices % s1Bar);
-        var v1 = this._sampleRingPeak(buf, back1, halfWidthSlices);
+        var v1 = this._sampleRingSmooth(buf, back1, halfWidthSlices);
 
         var s4Bar = s1Bar * 4;
         var back4 = s4Bar - (futureSlices % s4Bar);
         if (filled > s4Bar + 4 && back4 < filled - 2) {
             var s2Bar = s1Bar * 2;
             var back2 = s2Bar - (futureSlices % s2Bar);
-            var v2 = this._sampleRingPeak(buf, back2, halfWidthSlices);
-            var v4 = this._sampleRingPeak(buf, back4, halfWidthSlices);
+            var v2 = this._sampleRingSmooth(buf, back2, halfWidthSlices);
+            var v4 = this._sampleRingSmooth(buf, back4, halfWidthSlices);
             return 0.55 * v1 + 0.30 * v2 + 0.15 * v4;
         }
         var s2Bar2 = s1Bar * 2;
         var back2b = s2Bar2 - (futureSlices % s2Bar2);
         if (filled > s2Bar2 + 4 && back2b < filled - 2) {
-            var v2b = this._sampleRingPeak(buf, back2b, halfWidthSlices);
+            var v2b = this._sampleRingSmooth(buf, back2b, halfWidthSlices);
             return 0.68 * v1 + 0.32 * v2b;
         }
         return v1;
@@ -665,14 +670,19 @@ class StemWaveformScene {
                 this._colIsFuture[c] = 0;
                 this._colAge[c] = age;
                 this._colFade[c] = (age < this.filledSlices - 1) ? 1.0 : 0.0;
-                this._colLow[c]    = this._sampleRingPeak(this.bufLow, age, halfWinSlices);
-                this._colMid[c]    = this._sampleRingPeak(this.bufMid, age, halfWinSlices);
-                this._colHigh[c]   = this._sampleRingPeak(this.bufHigh, age, halfWinSlices);
-                this._colComp[c]   = this._sampleRingPeak(this.bufComp, age, halfWinSlices);
-                this._colDetail[c] = this._sampleRingPeak(this.bufDetail, age, halfWinSlices);
+                this._colLow[c]    = this._sampleRingSmooth(this.bufLow, age, halfWinSlices);
+                this._colMid[c]    = this._sampleRingSmooth(this.bufMid, age, halfWinSlices);
+                this._colHigh[c]   = this._sampleRingSmooth(this.bufHigh, age, halfWinSlices);
+                this._colComp[c]   = this._sampleRingSmooth(this.bufComp, age, halfWinSlices);
+                this._colDetail[c] = this._sampleRingSmooth(this.bufDetail, age, halfWinSlices);
                 for (var sIdx = 0; sIdx < stemCount; sIdx++) {
-                    var sBuf = this._bufByKey[stemDefs[sIdx].key];
-                    this._colStems[sIdx][c] = this._sampleRingPeak(sBuf, age, halfWinSlices);
+                    var sDef = stemDefs[sIdx];
+                    var sBuf = this._bufByKey[sDef.key];
+                    var sVal = this._sampleRingSmooth(sBuf, age, halfWinSlices);
+                    if (sDef.mixHats) {
+                        sVal = Math.min(1.0, sVal + 0.28 * this._sampleRingSmooth(this.bufHats, age, halfWinSlices));
+                    }
+                    this._colStems[sIdx][c] = sVal;
                 }
             } else {
                 var futureSlices = dx / pxPerSlice;
@@ -684,28 +694,38 @@ class StemWaveformScene {
                     var mirrorAge = futureSlices + subSliceAge;
                     var mirrorFade = this.params.forecastOpacity * 0.72 * Math.pow(1.0 - distFrac, 0.7);
                     this._colFade[c] = (mirrorAge < this.filledSlices - 1) ? mirrorFade : 0.0;
-                    this._colLow[c]    = this._sampleRingPeak(this.bufLow, mirrorAge, halfWinSlices);
-                    this._colMid[c]    = this._sampleRingPeak(this.bufMid, mirrorAge, halfWinSlices);
-                    this._colHigh[c]   = this._sampleRingPeak(this.bufHigh, mirrorAge, halfWinSlices);
-                    this._colComp[c]   = this._sampleRingPeak(this.bufComp, mirrorAge, halfWinSlices);
-                    this._colDetail[c] = this._sampleRingPeak(this.bufDetail, mirrorAge, halfWinSlices);
+                    this._colLow[c]    = this._sampleRingSmooth(this.bufLow, mirrorAge, halfWinSlices);
+                    this._colMid[c]    = this._sampleRingSmooth(this.bufMid, mirrorAge, halfWinSlices);
+                    this._colHigh[c]   = this._sampleRingSmooth(this.bufHigh, mirrorAge, halfWinSlices);
+                    this._colComp[c]   = this._sampleRingSmooth(this.bufComp, mirrorAge, halfWinSlices);
+                    this._colDetail[c] = this._sampleRingSmooth(this.bufDetail, mirrorAge, halfWinSlices);
                     for (var sIdxM = 0; sIdxM < stemCount; sIdxM++) {
-                        var sBufM = this._bufByKey[stemDefs[sIdxM].key];
-                        this._colStems[sIdxM][c] = this._sampleRingPeak(sBufM, mirrorAge, halfWinSlices);
+                        var sDefM = stemDefs[sIdxM];
+                        var sBufM = this._bufByKey[sDefM.key];
+                        var sValM = this._sampleRingSmooth(sBufM, mirrorAge, halfWinSlices);
+                        if (sDefM.mixHats) {
+                            sValM = Math.min(1.0, sValM + 0.28 * this._sampleRingSmooth(this.bufHats, mirrorAge, halfWinSlices));
+                        }
+                        this._colStems[sIdxM][c] = sValM;
                     }
                 } else {
                     var fFade = forecastReady * this.params.forecastOpacity * Math.pow(1.0 - distFrac, 0.75);
                     this._colFade[c] = fFade;
                     if (fFade > 0.01) {
                         var fSlicesAdj = Math.max(0, futureSlices - subSliceAge);
-                        this._colLow[c]    = this._sampleForecastPeak(this.bufLow, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colMid[c]    = this._sampleForecastPeak(this.bufMid, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colHigh[c]   = this._sampleForecastPeak(this.bufHigh, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colComp[c]   = this._sampleForecastPeak(this.bufComp, fSlicesAdj, slicesPerBar, halfWinSlices);
-                        this._colDetail[c] = this._sampleForecastPeak(this.bufDetail, fSlicesAdj, slicesPerBar, halfWinSlices);
+                        this._colLow[c]    = this._sampleForecastSmooth(this.bufLow, fSlicesAdj, slicesPerBar, halfWinSlices);
+                        this._colMid[c]    = this._sampleForecastSmooth(this.bufMid, fSlicesAdj, slicesPerBar, halfWinSlices);
+                        this._colHigh[c]   = this._sampleForecastSmooth(this.bufHigh, fSlicesAdj, slicesPerBar, halfWinSlices);
+                        this._colComp[c]   = this._sampleForecastSmooth(this.bufComp, fSlicesAdj, slicesPerBar, halfWinSlices);
+                        this._colDetail[c] = this._sampleForecastSmooth(this.bufDetail, fSlicesAdj, slicesPerBar, halfWinSlices);
                         for (var sIdxF = 0; sIdxF < stemCount; sIdxF++) {
-                            var sBufF = this._bufByKey[stemDefs[sIdxF].key];
-                            this._colStems[sIdxF][c] = this._sampleForecastPeak(sBufF, fSlicesAdj, slicesPerBar, halfWinSlices);
+                            var sDefF = stemDefs[sIdxF];
+                            var sBufF = this._bufByKey[sDefF.key];
+                            var sValF = this._sampleForecastSmooth(sBufF, fSlicesAdj, slicesPerBar, halfWinSlices);
+                            if (sDefF.mixHats) {
+                                sValF = Math.min(1.0, sValF + 0.28 * this._sampleForecastSmooth(this.bufHats, fSlicesAdj, slicesPerBar, halfWinSlices));
+                            }
+                            this._colStems[sIdxF][c] = sValF;
                         }
                     } else {
                         this._colLow[c] = this._colMid[c] = this._colHigh[c] = this._colComp[c] = this._colDetail[c] = 0;
@@ -912,60 +932,17 @@ class StemWaveformScene {
 
         if (style === "serato") {
             ctx.save();
-            var baseBarW = Math.max(1.5, colStep * 0.92);
-            var barColor, coreColor;
-            for (var c = 0; c < nCols; c++) {
-                var sp = this._colSplit[c];
-                var uWeight = Math.pow(this._clamp(1.0 - sp, 0, 1), 1.15);
-                var visAlpha = this._colFade[c] * this._clamp((1.0 - sp) * 1.35, 0, 1);
-                if (visAlpha <= 0.015 || uWeight <= 0.01) continue;
-
-                var low = this._colLow[c];
-                var mid = this._colMid[c];
-                var high = this._colHigh[c];
-                var rawAmp = Math.max(this._colComp[c], low * 0.56 + mid * 0.44 + high * 0.34) * gainScale * 0.88;
-                var amp = Math.tanh(rawAmp * 1.15);
-                var hPx = Math.max(1.0, amp * maxH * uWeight);
-                var x = this._colX[c];
-
-                // Authentic Serato RGB: vivid Red (Lows), Emerald/Lime (Mids), Electric Blue/Cyan (Highs)
-                var baseFloor = Math.min(low, mid, high) * 0.45;
-                var rF = Math.pow(Math.max(0.01, low - baseFloor), 1.45);
-                var gF = Math.pow(Math.max(0.01, mid - baseFloor * 0.9), 1.45);
-                var bF = Math.pow(Math.max(0.01, high * 1.12 - baseFloor * 0.85), 1.45);
-                var maxC = Math.max(rF, gF, bF, 0.001);
-                var boost = 255 / maxC;
-                var lumLift = amp * 14;
-                var r = Math.min(255, Math.round(rF * boost * 0.94 + lumLift));
-                var g = Math.min(255, Math.round(gF * boost * 0.94 + lumLift));
-                var b = Math.min(255, Math.round(bF * boost * 0.94 + lumLift));
-
-                this._project(x, centerY - hPx, 0, ptTop);
-                this._project(x, centerY + hPx, 0, ptBot);
-
-                barColor = "rgba(" + r + "," + g + "," + b + "," + visAlpha.toFixed(3) + ")";
-                ctx.strokeStyle = barColor;
-                ctx.lineWidth = baseBarW * ((ptTop.s + ptBot.s) * 0.5);
-                ctx.beginPath();
-                ctx.moveTo(ptTop.x, ptTop.y);
-                ctx.lineTo(ptBot.x, ptBot.y);
-                ctx.stroke();
-
-                // Hot core spine
-                if (amp > 0.20 && uWeight > 0.2) {
-                    var coreH = hPx * 0.26;
-                    this._project(x, centerY - coreH, 0, ptTop);
-                    this._project(x, centerY + coreH, 0, ptBot);
-                    var cr = Math.min(255, r + 95);
-                    var cg = Math.min(255, g + 95);
-                    var cb = Math.min(255, b + 95);
-                    coreColor = "rgba(" + cr + "," + cg + "," + cb + "," + Math.min(1, visAlpha * 0.68).toFixed(3) + ")";
-                    ctx.strokeStyle = coreColor;
-                    ctx.lineWidth = Math.max(1.0, baseBarW * 0.62);
-                    ctx.beginPath();
-                    ctx.moveTo(ptTop.x, ptTop.y);
-                    ctx.lineTo(ptBot.x, ptBot.y);
-                    ctx.stroke();
+            for (var pass = 0; pass < 2; pass++) {
+                var wantFuture = (pass === 1);
+                var startC = -1, endC = -1;
+                for (var c = 0; c < nCols; c++) {
+                    if ((this._colIsFuture[c] === 1) !== wantFuture) continue;
+                    if (this._colFade[c] <= 0.015) continue;
+                    if (startC < 0) startC = c;
+                    endC = c;
+                }
+                if (endC - startC >= 1) {
+                    this._drawSeratoUnifiedPass(ctx, startC, endC, wantFuture, centerY, maxH, gainScale, glowAmt);
                 }
             }
 
@@ -1008,6 +985,95 @@ class StemWaveformScene {
                         Math.round((pRgb0[2] + pRgb1[2]) * 0.5);
         this._drawUnifiedRibbonBand(ctx, nCols, centerY, maxH, gainScale, this._colComp, neonColor, 0.24, false);
         this._drawUnifiedNeonContour(ctx, nCols, centerY, maxH, gainScale, "0, 240, 255", "255, 51, 145", glowAmt);
+    }
+
+    _drawSeratoUnifiedPass(ctx, startC, endC, wantFuture, centerY, maxH, gainScale, glowAmt) {
+        var pt = { x: 0, y: 0, s: 1 };
+        this._project(this._colX[startC], centerY, 0, pt);
+        var gx0 = pt.x;
+        this._project(this._colX[endC], centerY, 0, pt);
+        var gx1 = pt.x;
+        var spanX = gx1 - gx0;
+        if (Math.abs(spanX) < 1.0) return;
+
+        var mainGrad = ctx.createLinearGradient(gx0, 0, gx1, 0);
+        var coreGrad = ctx.createLinearGradient(gx0, 0, gx1, 0);
+        var haloGrad = (!wantFuture && glowAmt > 0.05) ? ctx.createLinearGradient(gx0, 0, gx1, 0) : null;
+
+        var numStops = wantFuture ? 44 : 72;
+        var lastT = 0.0;
+        for (var st = 0; st < numStops; st++) {
+            var u = st / (numStops - 1);
+            var colIdx = Math.round(startC + u * (endC - startC));
+            var cA = Math.max(startC, colIdx - 1);
+            var cB = Math.min(endC, colIdx + 1);
+            var low = 0, mid = 0, high = 0, fade = 0, ampAcc = 0, cnt = 0;
+            for (var k = cA; k <= cB; k++) {
+                low += this._colLow[k];
+                mid += this._colMid[k];
+                high += this._colHigh[k];
+                fade += this._colFade[k];
+                ampAcc += this._colComp[k];
+                cnt++;
+            }
+            low /= cnt; mid /= cnt; high /= cnt; fade /= cnt; ampAcc /= cnt;
+            var ampEst = Math.tanh(Math.max(ampAcc, low * 0.56 + mid * 0.44 + high * 0.34) * gainScale * 0.88 * 1.15);
+
+            var baseFloor = Math.min(low, mid, high) * 0.45;
+            var rF = Math.pow(Math.max(0.01, low - baseFloor), 1.45);
+            var gF = Math.pow(Math.max(0.01, mid - baseFloor * 0.9), 1.45);
+            var bF = Math.pow(Math.max(0.01, high * 1.12 - baseFloor * 0.85), 1.45);
+            var maxC = Math.max(rF, gF, bF, 0.001);
+            var boost = 255 / maxC;
+            var lumLift = ampEst * 14;
+            var r = Math.min(255, Math.round(rF * boost * 0.94 + lumLift));
+            var g = Math.min(255, Math.round(gF * boost * 0.94 + lumLift));
+            var b = Math.min(255, Math.round(bF * boost * 0.94 + lumLift));
+
+            this._project(this._colX[colIdx], centerY, 0, pt);
+            var stopT = this._clamp((pt.x - gx0) / spanX, lastT, 1.0);
+            lastT = stopT;
+
+            var stopAlpha = wantFuture ? this._clamp(fade, 0.0, 0.80) : 0.94;
+            mainGrad.addColorStop(stopT, "rgba(" + r + "," + g + "," + b + "," + stopAlpha.toFixed(3) + ")");
+
+            var cr = Math.min(255, r + 105), cg = Math.min(255, g + 105), cb = Math.min(255, b + 105);
+            coreGrad.addColorStop(stopT, "rgba(" + cr + "," + cg + "," + cb + "," + (stopAlpha * 0.65).toFixed(3) + ")");
+            if (haloGrad) {
+                haloGrad.addColorStop(stopT, "rgba(" + r + "," + g + "," + b + "," + (0.18 * glowAmt).toFixed(3) + ")");
+            }
+        }
+
+        var fillBand = (heightMul, grad, isAdditive) => {
+            ctx.save();
+            if (isAdditive) ctx.globalCompositeOperation = "lighter";
+            ctx.beginPath();
+            for (var i = startC; i <= endC; i++) {
+                var uW = Math.pow(this._clamp(1.0 - this._colSplit[i], 0, 1), 1.15);
+                var rawAmp = Math.max(this._colComp[i], this._colLow[i] * 0.56 + this._colMid[i] * 0.44 + this._colHigh[i] * 0.34) * gainScale * 0.88;
+                var amp = Math.tanh(rawAmp * 1.15);
+                var hPx = (uW <= 0.005) ? 0.0 : Math.max(0.8, amp * maxH * uW * heightMul);
+                this._project(this._colX[i], centerY - hPx, 0, pt);
+                if (i === startC) ctx.moveTo(pt.x, pt.y);
+                else ctx.lineTo(pt.x, pt.y);
+            }
+            for (var j = endC; j >= startC; j--) {
+                var uWb = Math.pow(this._clamp(1.0 - this._colSplit[j], 0, 1), 1.15);
+                var rawAmpB = Math.max(this._colComp[j], this._colLow[j] * 0.56 + this._colMid[j] * 0.44 + this._colHigh[j] * 0.34) * gainScale * 0.88;
+                var ampB = Math.tanh(rawAmpB * 1.15);
+                var hPxB = (uWb <= 0.005) ? 0.0 : Math.max(0.8, ampB * maxH * uWb * heightMul);
+                this._project(this._colX[j], centerY + hPxB, 0, pt);
+                ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.restore();
+        };
+
+        if (haloGrad) fillBand(1.06, haloGrad, true);
+        fillBand(1.0, mainGrad, false);
+        fillBand(0.28, coreGrad, !wantFuture);
     }
 
     _strokeUnifiedForecastOutline(ctx, nCols, centerY, maxH, gainScale, strokeStyle) {
@@ -1243,79 +1309,36 @@ class StemWaveformScene {
                 var avgFade = wantFuture ? this._clamp(fadeSum / cnt, 0, 0.72) : 1.0;
 
                 if (style === "serato") {
-                    // Batched crisp vertical bars
                     ctx.save();
                     if (glowAmt > 0.05 && !wantFuture) {
-                        ctx.globalCompositeOperation = "lighter";
-                        ctx.beginPath();
-                        for (var b0 = startC; b0 <= endC; b0++) {
-                            var sp0 = this._colSplit[b0];
-                            if (sp0 <= 0.02) continue;
-                            var amp0 = this._clamp(colArr[b0] * gainScale, 0, 1.10);
-                            var h0 = Math.max(1.2, amp0 * stemMaxH * sp0 * 1.18);
-                            var ay0 = centerY + (targetY - centerY) * sp0;
-                            var az0 = targetZ * sp0;
-                            this._project(this._colX[b0], ay0 - h0, az0, pt0);
-                            this._project(this._colX[b0], ay0 + h0, az0, pt1);
-                            ctx.moveTo(pt0.x, pt0.y);
-                            ctx.lineTo(pt1.x, pt1.y);
-                        }
-                        ctx.strokeStyle = "rgba(" + rgbStr + "," + (0.18 * glowAmt * this.splitAmount).toFixed(3) + ")";
-                        ctx.lineWidth = Math.max(2.0, colStep * 1.35);
-                        ctx.stroke();
-                        ctx.globalCompositeOperation = "source-over";
+                        this._fillStemPolygon(
+                            ctx, startC, endC, targetY, targetZ, centerY, stemMaxH * 1.12, gainScale, colArr,
+                            "rgba(" + rgbStr + "," + (0.16 * glowAmt * this.splitAmount).toFixed(3) + ")", true
+                        );
                     }
-
-                    // Main saturated stem bars
-                    ctx.beginPath();
-                    for (var b1 = startC; b1 <= endC; b1++) {
-                        var sp1 = this._colSplit[b1];
-                        if (sp1 <= 0.02) continue;
-                        var amp1 = this._clamp(colArr[b1] * gainScale, 0, 1.10);
-                        var h1 = Math.max(1.0, amp1 * stemMaxH * sp1);
-                        var ay1 = centerY + (targetY - centerY) * sp1;
-                        var az1 = targetZ * sp1;
-                        this._project(this._colX[b1], ay1 - h1, az1, pt0);
-                        this._project(this._colX[b1], ay1 + h1, az1, pt1);
-                        ctx.moveTo(pt0.x, pt0.y);
-                        ctx.lineTo(pt1.x, pt1.y);
-                    }
-                    ctx.strokeStyle = "rgba(" + rgbStr + "," + (0.94 * avgFade * this.splitAmount).toFixed(3) + ")";
-                    ctx.lineWidth = Math.max(1.5, colStep * 0.90);
-                    ctx.stroke();
-
-                    // Hot inner spine
-                    ctx.beginPath();
-                    for (var b2 = startC; b2 <= endC; b2++) {
-                        var sp2 = this._colSplit[b2];
-                        if (sp2 <= 0.02) continue;
-                        var amp2 = this._clamp(colArr[b2] * gainScale, 0, 1.10);
-                        if (amp2 < 0.14) continue;
-                        var h2 = Math.max(0.8, amp2 * stemMaxH * 0.34 * sp2);
-                        var ay2 = centerY + (targetY - centerY) * sp2;
-                        var az2 = targetZ * sp2;
-                        this._project(this._colX[b2], ay2 - h2, az2, pt0);
-                        this._project(this._colX[b2], ay2 + h2, az2, pt1);
-                        ctx.moveTo(pt0.x, pt0.y);
-                        ctx.lineTo(pt1.x, pt1.y);
-                    }
-                    ctx.strokeStyle = "rgba(" + brightStr + "," + (0.85 * avgFade * this.splitAmount).toFixed(3) + ")";
-                    ctx.lineWidth = Math.max(1.0, colStep * 0.52);
-                    ctx.stroke();
-
-                    if (wantFuture) {
-                        this._strokeStemOutline(ctx, startC, endC, targetY, targetZ, centerY, stemMaxH, gainScale, colArr, "rgba(" + brightStr + "," + (0.45 * avgFade).toFixed(3) + ")", true);
-                    }
+                    this._fillStemPolygon(
+                        ctx, startC, endC, targetY, targetZ, centerY, stemMaxH, gainScale, colArr,
+                        this._stemFillStyle(ctx, startC, endC, targetY, targetZ, centerY, rgbStr, 0.90 * this.splitAmount, wantFuture), false
+                    );
+                    this._fillStemPolygon(
+                        ctx, startC, endC, targetY, targetZ, centerY, stemMaxH * 0.34, gainScale, colArr,
+                        this._stemFillStyle(ctx, startC, endC, targetY, targetZ, centerY, brightStr, 0.78 * this.splitAmount, wantFuture), !wantFuture
+                    );
+                    this._strokeStemOutline(
+                        ctx, startC, endC, targetY, targetZ, centerY, stemMaxH, gainScale, colArr,
+                        "rgba(" + brightStr + "," + (wantFuture ? (0.48 * avgFade) : (0.45 * this.splitAmount)).toFixed(3) + ")",
+                        wantFuture, 1.0 * this.lineThickness
+                    );
                     ctx.restore();
                 } else if (style === "rekordbox") {
                     ctx.save();
                     this._fillStemPolygon(
                         ctx, startC, endC, targetY, targetZ, centerY, stemMaxH, gainScale, colArr,
-                        "rgba(" + rgbStr + "," + (0.82 * avgFade * this.splitAmount).toFixed(3) + ")", false
+                        this._stemFillStyle(ctx, startC, endC, targetY, targetZ, centerY, rgbStr, 0.82 * this.splitAmount, wantFuture), false
                     );
                     this._fillStemPolygon(
                         ctx, startC, endC, targetY, targetZ, centerY, stemMaxH * 0.42, gainScale, colArr,
-                        "rgba(" + brightStr + "," + (0.68 * avgFade * this.splitAmount).toFixed(3) + ")", true
+                        this._stemFillStyle(ctx, startC, endC, targetY, targetZ, centerY, brightStr, 0.68 * this.splitAmount, wantFuture), true
                     );
                     if (wantFuture) {
                         this._strokeStemOutline(ctx, startC, endC, targetY, targetZ, centerY, stemMaxH, gainScale, colArr, "rgba(" + brightStr + "," + (0.50 * avgFade).toFixed(3) + ")", true);
@@ -1326,7 +1349,7 @@ class StemWaveformScene {
                     ctx.save();
                     this._fillStemPolygon(
                         ctx, startC, endC, targetY, targetZ, centerY, stemMaxH, gainScale, colArr,
-                        "rgba(" + rgbStr + "," + (0.22 * avgFade * this.splitAmount).toFixed(3) + ")", false
+                        this._stemFillStyle(ctx, startC, endC, targetY, targetZ, centerY, rgbStr, 0.22 * this.splitAmount, wantFuture), false
                     );
                     if (glowAmt > 0.05) {
                         ctx.globalCompositeOperation = "lighter";
@@ -1350,6 +1373,28 @@ class StemWaveformScene {
         }
     }
 
+    _stemFillStyle(ctx, startC, endC, targetY, targetZ, centerY, rgbStr, alphaMax, isFuture) {
+        if (!isFuture) {
+            return "rgba(" + rgbStr + "," + alphaMax.toFixed(3) + ")";
+        }
+        var pt0 = { x: 0, y: 0, s: 1 }, pt1 = { x: 0, y: 0, s: 1 };
+        var sp0 = this._colSplit[startC], sp1 = this._colSplit[endC];
+        this._project(this._colX[startC], centerY + (targetY - centerY) * sp0, targetZ * sp0, pt0);
+        this._project(this._colX[endC], centerY + (targetY - centerY) * sp1, targetZ * sp1, pt1);
+        if (Math.abs(pt1.x - pt0.x) < 1.0) {
+            return "rgba(" + rgbStr + "," + (alphaMax * this._colFade[startC]).toFixed(3) + ")";
+        }
+        var g = ctx.createLinearGradient(pt0.x, 0, pt1.x, 0);
+        var stops = 5;
+        for (var s = 0; s < stops; s++) {
+            var u = s / (stops - 1);
+            var cIdx = Math.round(startC + u * (endC - startC));
+            var a = this._clamp(alphaMax * this._colFade[cIdx], 0, 1);
+            g.addColorStop(u, "rgba(" + rgbStr + "," + a.toFixed(3) + ")");
+        }
+        return g;
+    }
+
     _fillStemPolygon(ctx, startC, endC, targetY, targetZ, centerY, stemMaxH, gainScale, colArr, fillStyle, additive) {
         var pt = { x: 0, y: 0, s: 1 };
         ctx.save();
@@ -1357,7 +1402,7 @@ class StemWaveformScene {
         ctx.beginPath();
         for (var i = startC; i <= endC; i++) {
             var sp = this._colSplit[i];
-            var amp = this._clamp(colArr[i] * gainScale, 0, 1.10);
+            var amp = Math.tanh(colArr[i] * gainScale * 1.15);
             var hPx = Math.max(0.8, amp * stemMaxH * sp);
             var ay = centerY + (targetY - centerY) * sp;
             this._project(this._colX[i], ay - hPx, targetZ * sp, pt);
@@ -1366,7 +1411,7 @@ class StemWaveformScene {
         }
         for (var j = endC; j >= startC; j--) {
             var spB = this._colSplit[j];
-            var ampB = this._clamp(colArr[j] * gainScale, 0, 1.10);
+            var ampB = Math.tanh(colArr[j] * gainScale * 1.15);
             var hPxB = Math.max(0.8, ampB * stemMaxH * spB);
             var ayB = centerY + (targetY - centerY) * spB;
             this._project(this._colX[j], ayB + hPxB, targetZ * spB, pt);
@@ -1388,7 +1433,7 @@ class StemWaveformScene {
             ctx.beginPath();
             for (var i = startC; i <= endC; i++) {
                 var sp = this._colSplit[i];
-                var amp = this._clamp(colArr[i] * gainScale, 0, 1.10);
+                var amp = Math.tanh(colArr[i] * gainScale * 1.15);
                 var hPx = Math.max(0.8, amp * stemMaxH * sp);
                 var ay = centerY + (targetY - centerY) * sp;
                 this._project(this._colX[i], ay + dir * hPx, targetZ * sp, pt);
@@ -1520,17 +1565,32 @@ class StemWaveformScene {
         var barStr = (this.barInCycle < 10 ? "0" : "") + this.barInCycle;
         var totStr = (cycleBars < 10 ? "0" : "") + cycleBars;
         var mode = this.params.cycleMode;
-        var label = (mode === "auto")
+
+        var srcState = (aud && aud.audioSourceState) ? aud.audioSourceState : "sim_no_mic";
+        var dotColor = "#38bdf8", srcLabel = "DETECTING";
+        if (srcState === "live_music") {
+            dotColor = "#10b981";
+            srcLabel = "LIVE";
+        } else if (srcState === "sim_no_signal") {
+            dotColor = "#f59e0b";
+            srcLabel = "SIM (NO MUSIC)";
+        } else if (srcState === "sim_no_mic") {
+            dotColor = "#f97316";
+            srcLabel = "SIM (NO MIC)";
+        }
+
+        var cyclePart = (mode === "auto")
             ? ("BAR " + barStr + " / " + totStr + "  •  " + this.phaseName + "  •  " + Math.round(this.bpm) + " BPM")
             : (this.phaseName + "  •  BAR " + barStr + "  •  " + Math.round(this.bpm) + " BPM");
+        var label = srcLabel + "  •  " + cyclePart;
 
         ctx.save();
-        var pillW = 340, pillH = 26;
+        var pillW = 448, pillH = 26;
         var px = width * 0.5 - pillW * 0.5;
         var py = 18;
 
-        ctx.fillStyle = "rgba(6, 11, 25, 0.78)";
-        ctx.strokeStyle = "rgba(56, 189, 248, 0.30)";
+        ctx.fillStyle = "rgba(6, 11, 25, 0.80)";
+        ctx.strokeStyle = (srcState === "live_music") ? "rgba(16, 185, 129, 0.45)" : "rgba(56, 189, 248, 0.30)";
         ctx.lineWidth = 1;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(px, py, pillW, pillH, 13);
@@ -1538,14 +1598,20 @@ class StemWaveformScene {
         ctx.fill();
         ctx.stroke();
 
+        // Audio source LED dot
+        ctx.fillStyle = dotColor;
+        ctx.beginPath();
+        ctx.arc(px + 15, py + 11, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.fillStyle = "#e2e8f0";
         ctx.font = "600 11px 'SF Mono', ui-monospace, monospace";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, width * 0.5, py + 11);
+        ctx.fillText(label, width * 0.5 + 6, py + 11);
 
         // 4-phase progress bar at bottom of status pill (UNIFIED | SPLIT | STEMS | MERGE)
-        var trackX = px + 22, trackY = py + pillH - 5, trackW = pillW - 44, trackH = 2.5;
+        var trackX = px + 24, trackY = py + pillH - 5, trackW = pillW - 48, trackH = 2.5;
         ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
         ctx.fillRect(trackX, trackY, trackW, trackH);
 
