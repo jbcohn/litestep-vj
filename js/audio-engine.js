@@ -104,21 +104,39 @@ class AudioEngine {
         this._inputChannelCount = 2;
 
         this._hpssBands = 64;
-        this._hpssFrames = 24;
+        this._hpssFrames = 11;
+        this._byteToAmpLut = new Float32Array(256);
+        for (let i = 1; i < 256; i++) {
+            this._byteToAmpLut[i] = Math.pow(10, (i / 255 - 1.0) * 3.5);
+        }
         this._hpssHistory = new Float32Array(this._hpssBands * this._hpssFrames);
         this._hpssWriteIdx = 0;
         this._hpssFilled = 0;
         this._hpssBandRanges = null;
+        this._vocBandIndices = [];
+        this._f1BandIndices = [];
+        this._f2BandIndices = [];
+        this._linBandTmp = new Float32Array(this._hpssBands);
+        this._rawFftBand = new Float32Array(this._hpssBands);
         this._hpssCurrent = new Float32Array(this._hpssBands);
         this._hpssPrev = new Float32Array(this._hpssBands);
         this._hpssFlux = new Float32Array(this._hpssBands);
         this._hpssTemporal = new Float32Array(this._hpssBands);
         this._hpssHarm = new Float32Array(this._hpssBands);
+        this._hpssHarm2 = new Float32Array(this._hpssBands);
         this._hpssPerc = new Float32Array(this._hpssBands);
         this._harmHistory = new Float32Array(this._hpssBands * this._hpssFrames);
         this._hpssMod = new Float32Array(this._hpssBands);
         this._bandMidDom = new Float32Array(this._hpssBands);
         this._hpssSortTmp = new Float32Array(this._hpssFrames);
+        this._stemAgcRef = 0.012;
+        this._prevKickE = 0;
+        this._slowKickE = 0;
+        this._prevBodyE = 0;
+        this._slowBodyE = 0;
+        this._prevSnapE = 0;
+        this._slowSnapE = 0;
+        this._vocalPresSmooth = 0;
         this._vocalGateSmooth = 0;
         this._prevTdRms = 0;
         this._prevTdPeak = 0;
@@ -163,13 +181,22 @@ class AudioEngine {
         for (let b = 0; b < this._hpssBands; b++) {
             const f0 = fMin * Math.pow(fMax / fMin, b / this._hpssBands);
             const f1 = fMin * Math.pow(fMax / fMin, (b + 1) / this._hpssBands);
-            const sBin = Math.max(1, Math.floor(f0 / binHz));
-            const eBin = Math.min(binCount - 1, Math.max(sBin, Math.ceil(f1 / binHz)));
+            const sBin = Math.max(1, Math.round(f0 / binHz));
+            const eBin = Math.min(binCount - 1, Math.max(sBin, Math.round(f1 / binHz) - 1));
             const msSBin = Math.max(1, Math.floor(f0 / msBinHz));
             const msEBin = Math.min(msBinCount - 1, Math.max(msSBin, Math.ceil(f1 / msBinHz)));
             ranges[b] = { sBin, eBin, msSBin, msEBin, fc: Math.sqrt(f0 * f1) };
         }
         this._hpssBandRanges = ranges;
+        this._vocBandIndices = [];
+        this._f1BandIndices = [];
+        this._f2BandIndices = [];
+        for (let b = 0; b < this._hpssBands; b++) {
+            const fc = ranges[b].fc;
+            if (fc >= 320 && fc <= 3500) this._vocBandIndices.push(b);
+            if (fc >= 320 && fc < 920) this._f1BandIndices.push(b);
+            if (fc >= 920 && fc <= 2800) this._f2BandIndices.push(b);
+        }
     }
 
     async init() {
@@ -426,6 +453,21 @@ class AudioEngine {
         return target > prev ? prev + (target - prev) * attack : prev + (target - prev) * decay;
     }
 
+    _harmCosDist(harm2Arr, histFrameIdx, idxs) {
+        let dot = 0, na = 0, nb = 0;
+        const off = histFrameIdx * this._hpssBands;
+        for (let i = 0; i < idxs.length; i++) {
+            const k = idxs[i];
+            const va = harm2Arr[k];
+            const vb = this._harmHistory[off + k];
+            dot += va * vb;
+            na += va * va;
+            nb += vb * vb;
+        }
+        if (na < 1e-7 || nb < 1e-7) return 0;
+        return Math.max(0, 1.0 - dot / Math.sqrt(na * nb));
+    }
+
     _updateLiveStems(dt) {
         if (!this.stemAnalyser || !this.stemFreqData || !this.stemTimeData) return;
 
@@ -437,7 +479,7 @@ class AudioEngine {
             this._buildHpssBands(sampleRate);
         }
 
-        // Time-domain RMS, peak & high-frequency detail
+        // Time-domain RMS, peak & relative level-invariant transient onset
         const td = this.stemTimeData;
         let sumSq = 0, peak = 0, fluxTD = 0;
         let prevV = (td[0] - 128) / 128;
@@ -450,11 +492,11 @@ class AudioEngine {
             prevV = v;
         }
         const rms = Math.sqrt(sumSq / td.length);
-        const tdRmsJump = Math.max(0, rms - this._prevTdRms);
-        const tdPeakJump = Math.max(0, peak - this._prevTdPeak);
-        this._prevTdRms = this._prevTdRms * 0.65 + rms * 0.35;
-        this._prevTdPeak = this._prevTdPeak * 0.60 + peak * 0.40;
-        const tdTransient = Math.min(1.0, (tdRmsJump * 4.5 + tdPeakJump * 1.8) * this.sensitivity);
+        const tdRelJump = Math.max(0, (rms - this._prevTdRms) / (this._prevTdRms + 0.005)) * 0.7
+                        + Math.max(0, (peak - this._prevTdPeak) / (this._prevTdPeak + 0.018)) * 0.3;
+        const tdTransient = Math.min(1.0, tdRelJump);
+        this._prevTdRms = this._prevTdRms * 0.72 + rms * 0.28;
+        this._prevTdPeak = this._prevTdPeak * 0.68 + peak * 0.32;
         const rawComposite = Math.min(1.0, (rms * 1.65 + peak * 0.45) * this.sensitivity);
         const rawDetail = Math.min(1.0, (fluxTD / td.length) * 2.4 * this.sensitivity);
 
@@ -479,31 +521,55 @@ class AudioEngine {
         const rawMid = getCrispBand(250, 2500);
         const rawHigh = getCrispBand(2500, Math.min(14000, sampleRate * 0.45));
 
-        // Populate 64 log-spaced HPSS bands + 1-frame positive spectral onset flux
+        // 1. Decompress 64 log bands from Web Audio dB bytes into linear amplitude + adaptive AGC
+        const lut = this._byteToAmpLut;
+        const linBand = this._linBandTmp;
+        const rawBand = this._rawFftBand;
         const nBands = this._hpssBands;
         const ranges = this._hpssBandRanges;
-        let risingBands = 0, midWideBandCount = 0;
+        let eSq = 0, eCnt = 0;
         for (let b = 0; b < nBands; b++) {
             const r = ranges[b];
+            let lSq = 0, lPeak = 0;
             let bSq = 0, bPeak = 0;
             const count = Math.max(1, r.eBin - r.sBin + 1);
             for (let i = r.sBin; i <= r.eBin; i++) {
-                const v = freq[i] / 255;
+                const rawByte = freq[i];
+                const v = rawByte / 255;
                 bSq += v * v;
                 if (v > bPeak) bPeak = v;
+                const amp = lut[rawByte];
+                lSq += amp * amp;
+                if (amp > lPeak) lPeak = amp;
             }
-            const bVal = Math.min(1.25, (Math.sqrt(bSq / count) * 0.7 + bPeak * 0.3) * this.sensitivity);
-            this._hpssCurrent[b] = bVal;
-            const flx = Math.max(0, bVal - this._hpssPrev[b]);
+            const lVal = Math.sqrt(lSq / count) * 0.7 + lPeak * 0.3;
+            linBand[b] = lVal;
+            rawBand[b] = Math.sqrt(bSq / count) * 0.7 + bPeak * 0.3;
+            if (r.fc >= 55 && r.fc <= 8000) {
+                eSq += lVal * lVal;
+                eCnt++;
+            }
+        }
+
+        const frameRms = Math.sqrt(eSq / Math.max(1, eCnt));
+        const sigPres = Math.min(1.0, Math.max(0.0, (frameRms - 0.0018) / 0.0055));
+        const agcRate = (frameRms > this._stemAgcRef) ? Math.min(1.0, dt * 3.2) : Math.min(1.0, dt * 0.45);
+        this._stemAgcRef = Math.max(0.004, this._stemAgcRef + (frameRms - this._stemAgcRef) * agcRate);
+
+        let risingBands = 0, midWideBandCount = 0;
+        for (let b = 0; b < nBands; b++) {
+            const val = Math.min(5.0, (linBand[b] / (this._stemAgcRef + 1e-6)) * sigPres);
+            this._hpssCurrent[b] = val;
+            const flx = Math.max(0, val - this._hpssPrev[b]);
             this._hpssFlux[b] = flx;
-            if (r.fc >= 60 && r.fc <= 8000) {
+            if (ranges[b].fc >= 120 && ranges[b].fc <= 7500) {
                 midWideBandCount++;
-                if (flx > 0.05 && bVal > 0.08) risingBands++;
+                if (flx > 0.12 && val > 0.20) risingBands++;
             }
         }
         const broadbandSpread = midWideBandCount ? (risingBands / midWideBandCount) : 0;
 
-        // Write current frame into 24-frame HPSS ring buffer
+        // 2. Write normalized linear frame into 11-frame syllable-friendly HPSS ring buffer (~180ms)
         const nFrames = this._hpssFrames;
         const writeOffset = this._hpssWriteIdx * nBands;
         this._hpssHistory.set(this._hpssCurrent, writeOffset);
@@ -511,11 +577,11 @@ class AudioEngine {
         this._hpssWriteIdx = (this._hpssWriteIdx + 1) % nFrames;
         if (this._hpssFilled < nFrames) this._hpssFilled++;
 
-        // Causal temporal median, HPSS decomposition & transient-clamped harmonic history for modulation
         const filled = this._hpssFilled;
         const tmp = this._hpssSortTmp;
         const medIdx = Math.floor((filled - 1) * 0.45);
-        const modHalf = Math.min(5, Math.max(1, Math.floor(filled / 2)));
+        const modHalf = Math.min(4, Math.max(1, Math.floor(filled / 2)));
+        const harm2Arr = this._hpssHarm2;
 
         for (let b = 0; b < nBands; b++) {
             for (let f = 0; f < filled; f++) {
@@ -542,13 +608,13 @@ class AudioEngine {
             const mPerc = s2 / (s2 + t2 + 1e-5);
             const mHarm = 1.0 - mPerc;
 
-            this._hpssPerc[b] = Math.max(0, Eb - 0.82 * Tb) * (0.45 + 0.55 * mPerc) + 0.2 * Eb * mPerc;
-            this._hpssHarm[b] = Math.min(Eb, Tb * 1.15) * (0.35 + 0.65 * mHarm) + 0.2 * Eb * mHarm;
+            this._hpssPerc[b] = Math.max(0, Eb - 0.85 * Tb) * (0.45 + 0.55 * mPerc) + 0.18 * Eb * mPerc;
+            this._hpssHarm[b] = Math.min(Eb, Tb * 1.25) * (0.35 + 0.65 * mHarm) + 0.22 * Eb * mHarm;
 
-            // 2-frame morphological erosion suppresses 1-frame transient spikes in harmonic history
-            const prevEb = this._hpssPrev[b];
-            const harm2 = Math.min(Eb, prevEb);
-            this._harmHistory[justWrittenIdx * nBands + b] = harm2;
+            // 2-frame morphological erosion suppresses 1-frame snare/drum spikes in vocal contour
+            const h2 = Math.min(Eb, this._hpssPrev[b]);
+            harm2Arr[b] = h2;
+            this._harmHistory[justWrittenIdx * nBands + b] = h2;
 
             let modAmp = 0;
             if (filled >= 4) {
@@ -561,12 +627,12 @@ class AudioEngine {
                 }
                 const avgNew = sumNew / modHalf;
                 const avgOld = sumOld / modHalf;
-                modAmp = Math.abs(avgNew - avgOld) / (0.5 * (avgNew + avgOld) + 0.03);
+                modAmp = Math.abs(avgNew - avgOld) / (0.5 * (avgNew + avgOld) + 0.08);
             }
             this._hpssMod[b] = Math.min(1.5, modAmp);
         }
 
-        // Per-band & global stereo Mid/Side confidence weighting
+        // 3. Linear-domain stereo Mid/Side confidence weighting
         this._bandMidDom.fill(0.5);
         let midTotal = 0, sideTotal = 0, diffRatio = 0, sideRatio = 0;
         if (this.analyserMid && this.analyserSide && this.midFreqData && this.sideFreqData && this._inputChannelCount >= 2) {
@@ -577,12 +643,12 @@ class AudioEngine {
             const bStart = Math.max(1, Math.floor(200 / msBinHz));
             const bEnd = Math.min(this.midFreqData.length - 1, Math.ceil(5500 / msBinHz));
             for (let i = bStart; i <= bEnd; i++) {
-                midTotal += this.midFreqData[i] / 255;
-                sideTotal += this.sideFreqData[i] / 255;
+                midTotal += lut[this.midFreqData[i]];
+                sideTotal += lut[this.sideFreqData[i]];
             }
-            diffRatio = Math.abs(midTotal - sideTotal) / (midTotal + sideTotal + 1e-4);
-            sideRatio = sideTotal / (midTotal + 1e-4);
-            const isStereoFrame = (diffRatio > 0.06 && sideRatio > 0.04 && sideRatio < 2.2);
+            diffRatio = Math.abs(midTotal - sideTotal) / (midTotal + sideTotal + 1e-5);
+            sideRatio = sideTotal / (midTotal + 1e-5);
+            const isStereoFrame = (diffRatio > 0.06 && sideRatio > 0.02 && sideRatio < 8.0);
             this.stereoConfidence += ((isStereoFrame ? 1.0 : 0.0) - this.stereoConfidence) * Math.min(1.0, dt * 3.0);
             this.hasStereo = this.stereoConfidence > 0.35;
 
@@ -590,92 +656,150 @@ class AudioEngine {
                 const r = ranges[b];
                 let mE = 0, sE = 0;
                 for (let k = r.msSBin; k <= r.msEBin; k++) {
-                    mE += this.midFreqData[k];
-                    sE += this.sideFreqData[k];
+                    mE += lut[this.midFreqData[k]];
+                    sE += lut[this.sideFreqData[k]];
                 }
-                this._bandMidDom[b] = (mE + sE > 1) ? (mE / (mE + sE + 1e-4)) : 0.5;
+                this._bandMidDom[b] = (mE + sE > 1e-5) ? (mE / (mE + sE + 1e-6)) : 0.5;
             }
         } else {
             this.stereoConfidence *= Math.exp(-dt * 4.0);
             this.hasStereo = false;
         }
 
-        // Competitive Exclusive Partitioning across 5 stems:
-        // Drums (transient onset flux + HPSS perc) | Bass | Vocals (pure harmonic formants, perc-suppressed) | Synths | Hi-Hats
-        let kickSum = 0, kickMax = 0, kickCnt = 0;
-        let snareSum = 0, snareMax = 0, snareCnt = 0;
+        // 4. Summed-band linear Drums, Bass, Hi-Hats & Mid Spectral Flatness
+        let kickSum = 0, kickCnt = 0;
+        let bodySum = 0, bodyCnt = 0;
+        let snapSum = 0, snapCnt = 0;
         let bassAcc = 0, bassCnt = 0;
+        let hatCoreSum = 0, hatCoreMax = 0, hatCoreCnt = 0;
+        let hatExtSum = 0, hatExtCnt = 0;
+        let vfMean = 0, vfLogSum = 0, vfCnt = 0;
+
+        for (let b = 0; b < nBands; b++) {
+            const fc = ranges[b].fc;
+            const Eb = this._hpssCurrent[b];
+            const Pb = this._hpssPerc[b];
+            const Hb = this._hpssHarm[b];
+            if (fc >= 55 && fc <= 165) { kickSum += Eb; kickCnt++; }
+            if (fc >= 180 && fc <= 1800) { bodySum += Eb; bodyCnt++; }
+            if (fc >= 1800 && fc <= 7500) { snapSum += Eb; snapCnt++; }
+            if (fc >= 40 && fc <= 210) {
+                bassAcc += 0.65 * Hb + 0.35 * Eb;
+                bassCnt++;
+            }
+            if (fc >= 3800 && fc <= 10500) {
+                const hv = 0.45 * Eb + 0.55 * Pb;
+                hatCoreSum += hv;
+                if (hv > hatCoreMax) hatCoreMax = hv;
+                hatCoreCnt++;
+            }
+            if (fc >= 10500 && fc <= 15500) {
+                hatExtSum += 0.45 * Eb + 0.55 * Pb;
+                hatExtCnt++;
+            }
+            if (fc >= 300 && fc <= 3500) {
+                const v = Eb + 1e-4;
+                vfMean += v;
+                vfLogSum += Math.log(v);
+                vfCnt++;
+            }
+        }
+
+        const kickE = kickCnt ? (kickSum / kickCnt) : 0;
+        const bodyE = bodyCnt ? (bodySum / bodyCnt) : 0;
+        const snapE = snapCnt ? (snapSum / snapCnt) : 0;
+        const midFlatness = vfCnt ? (Math.exp(vfLogSum / vfCnt) / (vfMean / vfCnt)) : 0;
+
+        const kickRelJump = Math.max(0, (kickE - this._prevKickE) / (this._slowKickE + 0.42));
+        const kickCrest = Math.max(0, (kickE - this._slowKickE * 1.18) / (this._slowKickE + 0.42));
+        const kickPres = Math.min(1.0, kickE / 0.32);
+
+        const bodyRelJump = Math.max(0, (bodyE - this._prevBodyE) / (this._slowBodyE + 0.32));
+        const snapRelJump = Math.max(0, (snapE - this._prevSnapE) / (this._slowSnapE + 0.07)) * Math.min(1.0, snapE * 4.5);
+
+        const kickScore = (kickRelJump * 1.05 + kickCrest * 0.65) * kickPres * (0.42 + 0.58 * Math.min(1.0, tdRelJump * 2.2 + broadbandSpread * 1.8));
+        const snareBroadGate = Math.min(1.0, Math.max(0.05, (broadbandSpread - 0.14) * 2.8));
+        const snareScore = (snapRelJump * 0.90 + Math.min(snapRelJump * 1.5, bodyRelJump * 1.6) * 0.65 + bodyRelJump * 0.45 * snareBroadGate) * (0.25 + 0.75 * snareBroadGate);
+
+        this._prevKickE = this._prevKickE * 0.45 + kickE * 0.55;
+        this._slowKickE = this._slowKickE * 0.90 + kickE * 0.10;
+        this._prevBodyE = this._prevBodyE * 0.45 + bodyE * 0.55;
+        this._slowBodyE = this._slowBodyE * 0.90 + bodyE * 0.10;
+        this._prevSnapE = this._prevSnapE * 0.38 + snapE * 0.62;
+        this._slowSnapE = this._slowSnapE * 0.90 + snapE * 0.10;
+
+        // 5. Vocal Formant-Balance (F2/F1) + Eroded Timbre Morphing + Flatness Rejection vs Synths
+        let f1E = 0, f2E = 0;
+        const f1Ids = this._f1BandIndices;
+        const f2Ids = this._f2BandIndices;
+        for (let i = 0; i < f1Ids.length; i++) f1E += harm2Arr[f1Ids[i]];
+        f1E /= Math.max(1, f1Ids.length);
+        for (let i = 0; i < f2Ids.length; i++) f2E += harm2Arr[f2Ids[i]];
+        f2E /= Math.max(1, f2Ids.length);
+        const f2OverF1 = f2E / (f1E + 0.08);
+
+        let d4 = 0, d8 = 0;
+        if (filled >= 5) d4 = this._harmCosDist(harm2Arr, (justWrittenIdx - 4 + nFrames * 2) % nFrames, this._vocBandIndices);
+        if (filled >= 9) d8 = this._harmCosDist(harm2Arr, (justWrittenIdx - 8 + nFrames * 2) % nFrames, this._vocBandIndices);
+        const timbreMorph = Math.min(1.0, Math.max(0.0, (d4 + 0.55 * d8 - 0.05) * 4.8));
+        const f2Presence = Math.min(1.0, Math.max(0.0, (f2OverF1 - 0.34) * 2.2));
+        const flatnessGate = Math.min(1.0, Math.max(0.0, (0.995 - midFlatness) / 0.045));
+
+        const monoVocGateTarget = f2Presence * (0.24 + 0.76 * timbreMorph) * flatnessGate;
+        this._vocalPresSmooth += (monoVocGateTarget - this._vocalPresSmooth) * Math.min(1.0, dt * 11.0);
+        this._vocalGateSmooth = this._vocalPresSmooth;
+
         let vocalAcc = 0, vocalMidBandCnt = 0;
         let synthAcc = 0, synthBandCnt = 0;
-        let hatAcc = 0, hatCnt = 0;
-
         let maxProm = 0, sumProm = 0, maxMod = 0, sumMod = 0;
         let maxPVocal = 0, maxBandRatio = 0;
         let sumMidDomVoc = 0, sumSustFrac = 0, sumVocBandE = 0, sumLocalFloor = 0;
 
         const stereoConf = this.stereoConfidence;
+        const monoFactor = Math.min(1.0, this._vocalPresSmooth * 2.4);
+
         for (let b = 0; b < nBands; b++) {
             const fc = ranges[b].fc;
-            const Eb = this._hpssCurrent[b];
-            const Tb = this._hpssTemporal[b];
-            const Pb = this._hpssPerc[b];
-            const Hb = this._hpssHarm[b];
-            const Modb = this._hpssMod[b];
-            const Fluxb = this._hpssFlux[b];
-            const midDom = this._bandMidDom[b];
-
-            if (fc >= 35 && fc <= 170) {
-                const kVal = Math.max(0, Eb - 0.78 * Tb) * 0.85 + Fluxb * 1.75 + Pb * 0.55;
-                kickSum += kVal;
-                if (kVal > kickMax) kickMax = kVal;
-                kickCnt++;
-            }
-            if (fc >= 180 && fc <= 2800) {
-                const sVal = Pb * 0.85 + Fluxb * 1.90;
-                snareSum += sVal;
-                if (sVal > snareMax) snareMax = sVal;
-                snareCnt++;
-            }
-
-            if (fc >= 25 && fc <= 220) {
-                bassAcc += 0.68 * Hb + 0.32 * Eb;
-                bassCnt++;
-            }
-
             if (fc >= 180 && fc <= 6000) {
                 synthBandCnt++;
+                const Eb = this._hpssCurrent[b];
+                const Tb = this._hpssTemporal[b];
+                const Hb = this._hpssHarm[b];
+                const Modb = this._hpssMod[b];
+                const midDom = this._bandMidDom[b];
                 let pVocal = 0;
-                if (fc >= 260 && fc <= 3500) {
+
+                if (fc >= 300 && fc <= 3500) {
                     vocalMidBandCnt++;
-                    const cUp = Math.min(1.0, Math.max(0.0, (fc - 260) / 190));
-                    const cDn = Math.min(1.0, Math.max(0.0, (3500 - fc) / 1100));
+                    const cUp = Math.min(1.0, Math.max(0.0, (fc - 300) / 220));
+                    const cDn = Math.min(1.0, Math.max(0.0, (3500 - fc) / 900));
                     const formantBell = cUp * cDn;
 
-                    // 2-frame morphological harmonic envelope + temporal sustain suppresses drum hits without hurting vibrato vocals
-                    const prevEb = this._hpssPrev[b];
-                    const sustFrac = Math.min(1.0, Math.max(0.0, (Tb / (Eb + 0.02) - 0.12) * 1.65));
-                    const vocalBandE = Math.min(Hb, Math.min(Eb, prevEb) * 1.15) * (0.25 + 0.75 * sustFrac);
+                    // Tilt-invariant symmetric surround floor (linear domain)
+                    const lAvg = (harm2Arr[Math.max(0, b - 4)] + harm2Arr[Math.max(0, b - 3)] + harm2Arr[Math.max(0, b - 2)]) / 3;
+                    const rAvg = (harm2Arr[Math.min(nBands - 1, b + 2)] + harm2Arr[Math.min(nBands - 1, b + 3)] + harm2Arr[Math.min(nBands - 1, b + 4)]) / 3;
+                    const localSurround = 0.5 * (lAvg + rAvg);
+                    const sustFrac = Math.min(1.0, Math.max(0.0, (Tb / (Eb + 0.04) - 0.08) * 1.55));
+                    const vocalBandE = harm2Arr[b] * (0.32 + 0.68 * sustFrac);
 
-                    const f0 = Math.max(0, b - 5);
-                    const f1 = Math.min(nBands - 1, b + 5);
-                    let localSum = 0;
-                    for (let j = f0; j <= f1; j++) localSum += this._hpssHarm[j];
-                    const localFloor = localSum / (f1 - f0 + 1);
+                    const bandRatio = vocalBandE / (localSurround + 0.05);
+                    const promScore = Math.min(1.0, Math.max(0.0, (bandRatio - 1.18) * 1.20));
+                    const modScore = Math.min(1.0, Math.max(0.0, (Modb - 0.05) * 3.0));
 
-                    const bandRatio = vocalBandE / (localFloor + 0.015);
-                    const promScore = Math.min(1.0, Math.max(0.0, (bandRatio - 1.18) * 1.90));
-                    const modScore = Math.min(1.0, Math.max(0.0, (Modb - 0.04) * 5.2));
-                    const formantGate = 0.15 + 0.85 * promScore;
-                    const sMono = formantBell * (0.62 * promScore + 0.38 * modScore) * formantGate;
+                    const f2Weight = (fc >= 850 && fc <= 3000) ? 1.35 : 0.72;
+                    const sMono = formantBell * f2Weight * (0.48 * promScore + 0.30 * modScore + 0.22 * timbreMorph) * (0.10 + 0.90 * promScore);
 
                     const stereoCue = Math.min(1.0, Math.max(0.0, (midDom - 0.52) * 4.5));
-                    const stereoPen = (midDom < 0.50) ? 0.20 : ((midDom < 0.56) ? (0.20 + 0.80 * (midDom - 0.50) / 0.06) : 1.0);
-                    const sStereo = formantBell * (0.44 * promScore + 0.24 * modScore + 0.32 * stereoCue) * stereoPen * formantGate;
+                    const stereoPen = (midDom < 0.50) ? 0.12 : ((midDom < 0.56) ? (0.12 + 0.88 * (midDom - 0.50) / 0.06) : 1.0);
+                    const sStereo = formantBell * (0.38 * promScore + 0.22 * modScore + 0.40 * stereoCue) * stereoPen * (0.15 + 0.85 * promScore);
 
-                    const rawProb = sMono * (1.0 - stereoConf) + sStereo * stereoConf;
-                    const t = Math.min(1.0, Math.max(0.0, (rawProb - 0.14) / (0.46 - 0.14)));
+                    const rawProb = (sMono * (1.0 - stereoConf) + sStereo * stereoConf) * flatnessGate;
+                    const t = Math.min(1.0, Math.max(0.0, (rawProb - 0.12) / (0.42 - 0.12)));
                     pVocal = t * t * (3.0 - 2.0 * t);
-                    vocalAcc += vocalBandE * pVocal;
+
+                    const finalPVoc = pVocal * (monoFactor * (1.0 - stereoConf) + 1.0 * stereoConf);
+                    vocalAcc += vocalBandE * finalPVoc;
+                    pVocal = finalPVoc;
 
                     if (promScore > maxProm) maxProm = promScore;
                     sumProm += promScore;
@@ -686,45 +810,35 @@ class AudioEngine {
                     sumMidDomVoc += midDom;
                     sumSustFrac += sustFrac;
                     sumVocBandE += vocalBandE;
-                    sumLocalFloor += localFloor;
+                    sumLocalFloor += localSurround;
                 }
                 const stereoSideBoost = 1.0 + stereoConf * Math.max(0.0, 0.65 - midDom) * 1.4;
                 synthAcc += Hb * (1.0 - pVocal) * stereoSideBoost;
             }
-
-            if (fc >= 4200 && fc <= 16000) {
-                hatAcc += 0.50 * Eb + 0.50 * Pb;
-                hatCnt++;
-            }
         }
 
-        const kickScore = (kickCnt ? kickSum / kickCnt : 0) * 0.55 + kickMax * 0.65;
-        const snareBroadGate = Math.min(1.0, Math.max(0.06, (broadbandSpread - 0.12) * 2.6));
-        const snareScore = ((snareCnt ? snareSum / snareCnt : 0) * 0.55 + snareMax * 0.65) * snareBroadGate;
-
-        const vocalNorm = vocalMidBandCnt ? (vocalAcc / Math.max(4.0, vocalMidBandCnt * 0.28)) : 0;
+        const gainMul = 0.55 + 0.45 * this.sensitivity;
+        const vocalNorm = vocalAcc / 1.85;
         const synthNorm = synthBandCnt ? (synthAcc / synthBandCnt) : 0;
 
-        // Frame-level Vocal Gate & broadband drum ducking
-        const vocalRatio = vocalNorm / (vocalNorm + synthNorm + 0.05);
-        const vocalGateTarget = Math.min(1.0, Math.max(0.0, (vocalRatio - 0.12) * 3.0));
-        this._vocalGateSmooth += (vocalGateTarget - this._vocalGateSmooth) * Math.min(1.0, dt * 10.0);
+        const broadbandDrumDuck = 1.0 - 0.82 * Math.min(1.0, Math.max(0.0, (broadbandSpread - 0.25) * 2.5) * Math.min(1.0, snareScore * 1.4));
+        const tdGate = Math.min(1.0, Math.max(0.08, (broadbandSpread - 0.08) * 3.0 + kickScore * 0.9));
 
-        const broadbandDrumDuck = 1.0 - 0.75 * Math.min(1.0, Math.max(0.0, (broadbandSpread - 0.28) * 2.5) * Math.min(1.0, snareScore * 1.4));
-        const tdGate = Math.min(1.0, Math.max(0.18, broadbandSpread * 2.5 + kickScore));
-
-        const rawDrums = Math.min(1.0, kickScore * 1.25 + snareScore * 1.20 + tdTransient * 0.55 * tdGate);
-        const rawBass = Math.min(1.0, (bassCnt ? bassAcc / bassCnt : 0) * 1.18);
-        const rawVocals = Math.min(1.0, vocalNorm * 1.55 * this._vocalGateSmooth * broadbandDrumDuck);
-        const rawSynths = Math.min(1.0, synthNorm * 1.35);
-        const rawHats = Math.min(1.0, (hatCnt ? hatAcc / hatCnt : 0) * 1.45);
+        const rawDrums = Math.min(1.0, Math.tanh((kickScore * 1.25 + snareScore * 1.20 + tdRelJump * 0.70 * tdGate) * gainMul));
+        const bassMean = bassCnt ? (bassAcc / bassCnt) : 0;
+        const rawBass = Math.min(1.0, Math.tanh(Math.max(0, bassMean - 0.10) * 0.68 * gainMul));
+        const rawVocals = Math.min(1.0, Math.tanh(vocalNorm * 1.55 * gainMul) * broadbandDrumDuck);
+        const rawSynths = Math.min(1.0, Math.tanh(synthNorm * 1.05 * gainMul));
+        const hatCore = hatCoreCnt ? ((hatCoreSum / hatCoreCnt) * 0.55 + hatCoreMax * 0.45) : 0;
+        const hatExt = hatExtCnt ? (hatExtSum / hatExtCnt) : 0;
+        const rawHats = Math.min(1.0, Math.tanh(Math.max(hatCore, hatExt * 1.35) * 2.4 * gainMul));
 
         const s = this.stems;
-        s.drums = this._smoothStem(s.drums, rawDrums, 0.96, 0.40);
-        s.bass = this._smoothStem(s.bass, rawBass, 0.72, 0.22);
-        s.vocals = this._smoothStem(s.vocals, rawVocals, 0.45, 0.22);
+        s.drums = this._smoothStem(s.drums, rawDrums, 0.96, 0.28);
+        s.bass = this._smoothStem(s.bass, rawBass, 0.70, 0.22);
+        s.vocals = this._smoothStem(s.vocals, rawVocals, 0.62, 0.20);
         s.synths = this._smoothStem(s.synths, rawSynths, 0.62, 0.20);
-        s.hats = this._smoothStem(s.hats, rawHats, 0.85, 0.34);
+        s.hats = this._smoothStem(s.hats, rawHats, 0.88, 0.34);
         s.air = s.hats;
 
         s.low = this._smoothStem(s.low, rawLow, 0.78, 0.26);
@@ -753,8 +867,11 @@ class AudioEngine {
             broadbandDrumDuck,
             vocalNorm,
             synthNorm,
-            vocalRatio,
-            vocalGateSmooth: this._vocalGateSmooth,
+            vocalRatio: f2OverF1,
+            vocalGateSmooth: this._vocalPresSmooth,
+            timbreMorph,
+            midFlatness,
+            agcRef: this._stemAgcRef,
             maxProm,
             meanProm: sumProm / vCnt,
             maxMod,
@@ -1353,7 +1470,7 @@ class AudioEngine {
             const eb = new Array(nB);
             const md = new Array(nB);
             for (let b = 0; b < nB; b++) {
-                eb[b] = Math.round(Math.max(0, Math.min(250, (this._hpssCurrent[b] || 0) * 200)));
+                eb[b] = Math.round(Math.max(0, Math.min(250, (this._rawFftBand[b] || 0) * this.sensitivity * 200)));
                 md[b] = Math.round(Math.max(0, Math.min(100, (this._bandMidDom[b] || 0) * 100)));
             }
             frame.eb = eb;
