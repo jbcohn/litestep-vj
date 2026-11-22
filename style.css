@@ -743,6 +743,69 @@ html, body {
     border-color: #c084fc;
 }
 
+.drawer-action-btn.recording {
+    background: rgba(239, 68, 68, 0.28);
+    border-color: #f87171;
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.28);
+}
+
+.drawer-action-btn.recording:hover {
+    background: rgba(239, 68, 68, 0.44);
+    border-color: #fca5a5;
+}
+
+.diag-tag-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
+    padding: 5px 4px;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.diag-tag-btn:hover:not(:disabled) {
+    background: rgba(56, 189, 248, 0.22);
+    border-color: #38bdf8;
+    color: #ffffff;
+}
+
+.diag-tag-btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+}
+
+.diag-tag-btn.marked {
+    background: rgba(16, 185, 129, 0.34);
+    border-color: #34d399;
+    color: #ffffff;
+}
+
+.diag-live-readout {
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #0b1224;
+    border: 1px solid rgba(56, 189, 248, 0.16);
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.66rem;
+    line-height: 1.45;
+    color: #93c5fd;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.diag-status-line {
+    margin-top: 6px;
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: #94a3b8;
+}
+
 .drawer-close-btn {
     background: transparent;
     border: none;

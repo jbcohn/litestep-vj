@@ -1216,6 +1216,8 @@ class VJController {
 
         var cbLabels = document.getElementById("check-stems-labels");
         if (cbLabels) cbLabels.checked = !!p.showLabels;
+
+        if (this.updateStemDiagUI) this.updateStemDiagUI();
     }
 
     syncProportionsUI() {
@@ -2343,6 +2345,57 @@ class VJController {
             });
         }
 
+        // Stem Diagnostics Log Recorder & Marker Tags
+        var btnStemsDiagRec = document.getElementById("btn-stems-diag-rec");
+        var diagTagBtns = document.querySelectorAll(".diag-tag-btn");
+        var diagStatusEl = document.getElementById("stems-diag-status");
+        if (btnStemsDiagRec) {
+            var finishDiagUI = (payload, filename) => {
+                btnStemsDiagRec.classList.remove("recording");
+                btnStemsDiagRec.textContent = "⏺ Record Stem Log (30s)";
+                diagTagBtns.forEach((b) => { b.disabled = true; });
+                if (diagStatusEl && payload) {
+                    diagStatusEl.textContent = "Saved " + filename + " (" + payload.meta.frameCount + "f • " + payload.meta.durationSec.toFixed(1) + "s)";
+                }
+                if (this.showToast && filename) {
+                    this.showToast("💾 Saved stem log: " + filename);
+                }
+            };
+
+            btnStemsDiagRec.addEventListener("click", () => {
+                var ae = window.audioEngine;
+                if (!ae || !ae.startStemDiagLog) return;
+                if (ae._diagRec && ae._diagRec.active) {
+                    ae.stopStemDiagLog(true);
+                } else {
+                    ae.startStemDiagLog(30, finishDiagUI);
+                    btnStemsDiagRec.classList.add("recording");
+                    btnStemsDiagRec.textContent = "⏹ Stop & Save (0.0s • 0f)";
+                    diagTagBtns.forEach((b) => { b.disabled = false; });
+                    if (diagStatusEl) {
+                        diagStatusEl.textContent = "Recording… tap 🎤 Vocal / 🥁 Drum / 🎹 Synth / 🔊 Bass when heard.";
+                    }
+                    if (this.updateStemDiagUI) this.updateStemDiagUI();
+                }
+            });
+        }
+
+        diagTagBtns.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                var ae = window.audioEngine;
+                if (!ae || !ae.markStemDiag) return;
+                var tag = btn.getAttribute("data-diag-tag") || "mark";
+                var m = ae.markStemDiag(tag);
+                if (m) {
+                    if (diagStatusEl) {
+                        diagStatusEl.textContent = "Marked " + tag.toUpperCase() + " @ " + m.t.toFixed(1) + "s";
+                    }
+                    btn.classList.add("marked");
+                    setTimeout(() => btn.classList.remove("marked"), 220);
+                }
+            });
+        });
+
         // Dance Move Rotation Select All / None Buttons
         var btnSelectAllDances = document.getElementById("btn-select-all-dances");
         if (btnSelectAllDances) {
@@ -2595,6 +2648,48 @@ class VJController {
         if (val) val.textContent = window.audioEngine.sensitivity.toFixed(1) + "x";
     }
 
+    updateStemDiagUI() {
+        var ae = window.audioEngine;
+        if (!ae) return;
+
+        var rec = ae._diagRec;
+        var isRec = !!(rec && rec.active);
+        var btnRec = document.getElementById("btn-stems-diag-rec");
+        var tagBtns = document.querySelectorAll(".diag-tag-btn");
+
+        if (btnRec) {
+            btnRec.classList.toggle("recording", isRec);
+            if (isRec && ae.getStemDiagStatus) {
+                var st = ae.getStemDiagStatus();
+                btnRec.textContent = "⏹ Stop & Save (" + st.elapsedSec.toFixed(1) + "s • " + st.frameCount + "f)";
+            } else {
+                btnRec.textContent = "⏺ Record Stem Log (30s)";
+            }
+        }
+        tagBtns.forEach((b) => {
+            b.disabled = !isRec;
+        });
+
+        var liveEl = document.getElementById("stems-diag-live");
+        if (liveEl) {
+            var s = ae.stems || {};
+            var fmt = (v) => Number(v || 0).toFixed(2);
+            var stemsTxt = "D:" + fmt(s.drums) + " B:" + fmt(s.bass) + " V:" + fmt(s.vocals) + " S:" + fmt(s.synths) + " H:" + fmt(s.hats);
+            if (ae.audioSourceState === "live_music" && ae.lastStemDiag) {
+                var d = ae.lastStemDiag;
+                var ch = ae._inputChannelCount || 1;
+                var sc = Number(d.stereoConf || 0).toFixed(2);
+                liveEl.textContent = "LIVE (" + ch + "ch sC=" + sc + ") | " + stemsTxt +
+                    "\n" +
+                    "gate=" + fmt(d.vocalGateSmooth) + " prom=" + fmt(d.maxProm) +
+                    " ratio=" + fmt(d.vocalRatio) + " duck=" + fmt(d.broadbandDrumDuck);
+            } else {
+                liveEl.textContent = "SIM MODE (" + (ae.audioSourceState || "sim") + ") | sig=" + fmt(ae.liveSignalLevel) +
+                    "\n" + stemsTxt;
+            }
+        }
+    }
+
     renderLoop(now) {
         try {
             var dt = Math.min((now - this.lastTime) / 1000, 0.1);
@@ -2614,6 +2709,12 @@ class VJController {
                     if (bpmElem.textContent !== text) {
                         bpmElem.textContent = text;
                     }
+                }
+                var diagDrawer = document.getElementById("proportions-drawer");
+                var diagOpenOnStems = diagDrawer && !diagDrawer.classList.contains("closed") && this.activeSceneIdx === 6;
+                var diagRecording = !!(audio._diagRec && audio._diagRec.active);
+                if (diagOpenOnStems || diagRecording) {
+                    this.updateStemDiagUI();
                 }
             }
 

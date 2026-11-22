@@ -136,6 +136,19 @@ class AudioEngine {
             composite: 0,
             detail: 0
         };
+
+        // Real-time Stem Diagnostics Telemetry & Log Recorder
+        this.lastStemDiag = null;
+        this._diagRec = {
+            active: false,
+            startedAtPerf: 0,
+            startedAtIso: '',
+            maxSec: 30,
+            maxFrames: 3600,
+            frames: [],
+            markers: [],
+            onFinish: null
+        };
     }
 
     _buildHpssBands(sampleRate) {
@@ -224,6 +237,9 @@ class AudioEngine {
         const prev = this.audioSourceState;
         this.audioSourceState = newState;
         this.useSimulation = (newState !== 'live_music');
+        if (this._diagRec && this._diagRec.active) {
+            this.markStemDiag('source:' + newState);
+        }
         this.audioSourceCallbacks.forEach(cb => {
             try { cb(newState, prev, this.audioStatusReason); } catch (e) { console.error("AudioSource callback error:", e); }
         });
@@ -552,20 +568,20 @@ class AudioEngine {
 
         // Per-band & global stereo Mid/Side confidence weighting
         this._bandMidDom.fill(0.5);
+        let midTotal = 0, sideTotal = 0, diffRatio = 0, sideRatio = 0;
         if (this.analyserMid && this.analyserSide && this.midFreqData && this.sideFreqData && this._inputChannelCount >= 2) {
             this.analyserMid.getByteFrequencyData(this.midFreqData);
             this.analyserSide.getByteFrequencyData(this.sideFreqData);
 
             const msBinHz = (sampleRate * 0.5) / this.midFreqData.length;
-            let midTotal = 0, sideTotal = 0;
             const bStart = Math.max(1, Math.floor(200 / msBinHz));
             const bEnd = Math.min(this.midFreqData.length - 1, Math.ceil(5500 / msBinHz));
             for (let i = bStart; i <= bEnd; i++) {
                 midTotal += this.midFreqData[i] / 255;
                 sideTotal += this.sideFreqData[i] / 255;
             }
-            const diffRatio = Math.abs(midTotal - sideTotal) / (midTotal + sideTotal + 1e-4);
-            const sideRatio = sideTotal / (midTotal + 1e-4);
+            diffRatio = Math.abs(midTotal - sideTotal) / (midTotal + sideTotal + 1e-4);
+            sideRatio = sideTotal / (midTotal + 1e-4);
             const isStereoFrame = (diffRatio > 0.06 && sideRatio > 0.04 && sideRatio < 2.2);
             this.stereoConfidence += ((isStereoFrame ? 1.0 : 0.0) - this.stereoConfidence) * Math.min(1.0, dt * 3.0);
             this.hasStereo = this.stereoConfidence > 0.35;
@@ -592,6 +608,10 @@ class AudioEngine {
         let vocalAcc = 0, vocalMidBandCnt = 0;
         let synthAcc = 0, synthBandCnt = 0;
         let hatAcc = 0, hatCnt = 0;
+
+        let maxProm = 0, sumProm = 0, maxMod = 0, sumMod = 0;
+        let maxPVocal = 0, maxBandRatio = 0;
+        let sumMidDomVoc = 0, sumSustFrac = 0, sumVocBandE = 0, sumLocalFloor = 0;
 
         const stereoConf = this.stereoConfidence;
         for (let b = 0; b < nBands; b++) {
@@ -642,7 +662,8 @@ class AudioEngine {
                     for (let j = f0; j <= f1; j++) localSum += this._hpssHarm[j];
                     const localFloor = localSum / (f1 - f0 + 1);
 
-                    const promScore = Math.min(1.0, Math.max(0.0, ((vocalBandE / (localFloor + 0.015)) - 1.18) * 1.90));
+                    const bandRatio = vocalBandE / (localFloor + 0.015);
+                    const promScore = Math.min(1.0, Math.max(0.0, (bandRatio - 1.18) * 1.90));
                     const modScore = Math.min(1.0, Math.max(0.0, (Modb - 0.04) * 5.2));
                     const formantGate = 0.15 + 0.85 * promScore;
                     const sMono = formantBell * (0.62 * promScore + 0.38 * modScore) * formantGate;
@@ -655,6 +676,17 @@ class AudioEngine {
                     const t = Math.min(1.0, Math.max(0.0, (rawProb - 0.14) / (0.46 - 0.14)));
                     pVocal = t * t * (3.0 - 2.0 * t);
                     vocalAcc += vocalBandE * pVocal;
+
+                    if (promScore > maxProm) maxProm = promScore;
+                    sumProm += promScore;
+                    if (modScore > maxMod) maxMod = modScore;
+                    sumMod += modScore;
+                    if (pVocal > maxPVocal) maxPVocal = pVocal;
+                    if (bandRatio > maxBandRatio) maxBandRatio = bandRatio;
+                    sumMidDomVoc += midDom;
+                    sumSustFrac += sustFrac;
+                    sumVocBandE += vocalBandE;
+                    sumLocalFloor += localFloor;
                 }
                 const stereoSideBoost = 1.0 + stereoConf * Math.max(0.0, 0.65 - midDom) * 1.4;
                 synthAcc += Hb * (1.0 - pVocal) * stereoSideBoost;
@@ -700,6 +732,45 @@ class AudioEngine {
         s.high = this._smoothStem(s.high, rawHigh, 0.78, 0.26);
         s.composite = this._smoothStem(s.composite, rawComposite, 0.82, 0.28);
         s.detail = this._smoothStem(s.detail, rawDetail, 0.75, 0.25);
+
+        const vCnt = Math.max(1, vocalMidBandCnt);
+        this.lastStemDiag = {
+            dt,
+            rms,
+            peak,
+            fluxTDNorm: fluxTD / td.length,
+            tdTransient,
+            tdGate,
+            stereoConf,
+            midTotal,
+            sideTotal,
+            diffRatio,
+            sideRatio,
+            kickScore,
+            snareScore,
+            snareBroadGate,
+            broadbandSpread,
+            broadbandDrumDuck,
+            vocalNorm,
+            synthNorm,
+            vocalRatio,
+            vocalGateSmooth: this._vocalGateSmooth,
+            maxProm,
+            meanProm: sumProm / vCnt,
+            maxMod,
+            meanMod: sumMod / vCnt,
+            maxPVocal,
+            maxBandRatio,
+            meanMidDomVoc: sumMidDomVoc / vCnt,
+            meanSustFrac: sumSustFrac / vCnt,
+            meanVocBandE: sumVocBandE / vCnt,
+            meanLocalFloor: sumLocalFloor / vCnt,
+            rawDrums,
+            rawBass,
+            rawVocals,
+            rawSynths,
+            rawHats
+        };
 
         this._hpssPrev.set(this._hpssCurrent);
     }
@@ -1131,6 +1202,10 @@ class AudioEngine {
 
             this._updateSimStems(dt, beatPos, beatSubPhase, beatFreq);
         }
+
+        if (this._diagRec && this._diagRec.active) {
+            this._captureStemDiagFrame(dt);
+        }
     }
 
     updateMusicalState(dt) {
@@ -1207,6 +1282,297 @@ class AudioEngine {
                 }
                 break;
         }
+    }
+
+    startStemDiagLog(maxSec = 30, onFinish = null) {
+        const rec = this._diagRec;
+        rec.frames = [];
+        rec.markers = [];
+        rec.maxSec = Math.max(5, Math.min(60, Number(maxSec) || 30));
+        rec.maxFrames = Math.min(4000, Math.round(rec.maxSec * 70));
+        rec.startedAtPerf = performance.now();
+        rec.startedAtIso = new Date().toISOString();
+        rec.onFinish = (typeof onFinish === 'function') ? onFinish : null;
+        rec.active = true;
+        rec.markers.push({ t: 0, frame: 0, tag: 'source:' + this.audioSourceState });
+        return true;
+    }
+
+    markStemDiag(tag) {
+        if (!this._diagRec || !this._diagRec.active) return null;
+        const t = Math.round(Math.max(0, (performance.now() - this._diagRec.startedAtPerf) / 1000) * 1000) / 1000;
+        const marker = { t, frame: this._diagRec.frames.length, tag: String(tag || 'mark') };
+        this._diagRec.markers.push(marker);
+        return marker;
+    }
+
+    getStemDiagStatus() {
+        const rec = this._diagRec;
+        const elapsedSec = (rec && rec.active) ? Math.max(0, (performance.now() - rec.startedAtPerf) / 1000) : 0;
+        return {
+            active: !!(rec && rec.active),
+            elapsedSec,
+            maxSec: rec ? rec.maxSec : 30,
+            frameCount: rec ? rec.frames.length : 0,
+            markerCount: rec ? rec.markers.length : 0
+        };
+    }
+
+    _captureStemDiagFrame(dt) {
+        const rec = this._diagRec;
+        if (!rec || !rec.active) return;
+
+        const r3 = (x) => Math.round((Number(x) || 0) * 1000) / 1000;
+        const r4 = (x) => Math.round((Number(x) || 0) * 10000) / 10000;
+        const t = r3(Math.max(0, (performance.now() - rec.startedAtPerf) / 1000));
+        const s = this.stems;
+
+        const frame = {
+            t,
+            dt: r4(dt),
+            src: this.audioSourceState,
+            sens: r3(this.sensitivity),
+            sig: r3(this.liveSignalLevel),
+            stems: [r3(s.drums), r3(s.bass), r3(s.vocals), r3(s.synths), r3(s.hats)]
+        };
+
+        if (this.audioSourceState === 'live_music' && this.lastStemDiag) {
+            const d = this.lastStemDiag;
+            frame.td = [r3(d.rms), r3(d.peak), r3(d.fluxTDNorm), r3(d.tdTransient), r3(d.tdGate)];
+            frame.ms = [r3(d.stereoConf), r3(d.midTotal), r3(d.sideTotal), r3(d.diffRatio), r3(d.sideRatio)];
+            frame.scores = [r3(d.kickScore), r3(d.snareScore), r3(d.snareBroadGate), r3(d.broadbandSpread), r3(d.broadbandDrumDuck)];
+            frame.vDiag = [
+                r3(d.vocalNorm), r3(d.synthNorm), r3(d.vocalRatio), r3(d.vocalGateSmooth),
+                r3(d.maxProm), r3(d.meanProm), r3(d.maxMod), r3(d.meanMod),
+                r3(d.maxPVocal), r3(d.maxBandRatio), r3(d.meanMidDomVoc),
+                r3(d.meanSustFrac), r3(d.meanVocBandE), r3(d.meanLocalFloor)
+            ];
+            frame.raw = [r3(d.rawDrums), r3(d.rawBass), r3(d.rawVocals), r3(d.rawSynths), r3(d.rawHats)];
+
+            const nB = this._hpssBands;
+            const eb = new Array(nB);
+            const md = new Array(nB);
+            for (let b = 0; b < nB; b++) {
+                eb[b] = Math.round(Math.max(0, Math.min(250, (this._hpssCurrent[b] || 0) * 200)));
+                md[b] = Math.round(Math.max(0, Math.min(100, (this._bandMidDom[b] || 0) * 100)));
+            }
+            frame.eb = eb;
+            frame.md = md;
+        }
+
+        rec.frames.push(frame);
+        if (t >= rec.maxSec || rec.frames.length >= rec.maxFrames) {
+            this.stopStemDiagLog(true);
+        }
+    }
+
+    _summarizeMetric(arr) {
+        if (!arr || arr.length === 0) {
+            return { mean: 0, p50: 0, p90: 0, p99: 0, max: 0 };
+        }
+        const r3 = (x) => Math.round((Number(x) || 0) * 1000) / 1000;
+        const sorted = arr.slice().sort((a, b) => a - b);
+        const n = sorted.length;
+        let sum = 0;
+        for (let i = 0; i < n; i++) sum += sorted[i];
+        const pct = (q) => sorted[Math.min(n - 1, Math.max(0, Math.floor((n - 1) * q)))];
+        return {
+            mean: r3(sum / n),
+            p50: r3(pct(0.50)),
+            p90: r3(pct(0.90)),
+            p99: r3(pct(0.99)),
+            max: r3(sorted[n - 1])
+        };
+    }
+
+    stopStemDiagLog(download = true) {
+        const rec = this._diagRec;
+        if (!rec) return null;
+        rec.active = false;
+
+        const r3 = (x) => Math.round((Number(x) || 0) * 1000) / 1000;
+        const r1 = (x) => Math.round((Number(x) || 0) * 10) / 10;
+        const sampleRate = this.audioCtx ? (this.audioCtx.sampleRate || 48000) : 48000;
+        if (!this._hpssBandRanges) {
+            this._buildHpssBands(sampleRate);
+        }
+
+        let trackLabel = null;
+        let trackSettings = null;
+        if (this.mediaStream && this.mediaStream.getAudioTracks) {
+            const tracks = this.mediaStream.getAudioTracks();
+            if (tracks && tracks[0]) {
+                trackLabel = tracks[0].label || null;
+                if (tracks[0].getSettings) {
+                    const st = tracks[0].getSettings();
+                    trackSettings = {
+                        channelCount: st.channelCount,
+                        sampleRate: st.sampleRate,
+                        echoCancellation: st.echoCancellation,
+                        noiseSuppression: st.noiseSuppression,
+                        autoGainControl: st.autoGainControl
+                    };
+                }
+            }
+        }
+
+        let appVersion = 'unknown';
+        if (typeof document !== 'undefined' && document.querySelector) {
+            const vEl = document.querySelector('.app-version');
+            if (vEl && vEl.textContent) appVersion = vEl.textContent.trim();
+        }
+
+        const frames = rec.frames;
+        const nFrames = frames.length;
+        const durationSec = nFrames > 0 ? r3(frames[nFrames - 1].t) : r3((performance.now() - rec.startedAtPerf) / 1000);
+
+        const stemArrays = [[], [], [], [], []];
+        let liveFrames = 0, simFrames = 0, stereoConfSum = 0, hasStereoCount = 0;
+        const ld = {
+            vocalNorm: [], synthNorm: [], vocalRatio: [], vocalGateSmooth: [],
+            broadbandSpread: [], broadbandDrumDuck: [], kickScore: [], snareScore: [],
+            maxProm: [], maxBandRatio: [], maxMod: [], maxPVocal: [],
+            meanMidDomVoc: [], meanSustFrac: [], rawVocals: []
+        };
+        const bandSum = new Float64Array(this._hpssBands);
+
+        for (let i = 0; i < nFrames; i++) {
+            const fr = frames[i];
+            for (let k = 0; k < 5; k++) stemArrays[k].push(fr.stems[k] || 0);
+            if (fr.src === 'live_music' && fr.vDiag) {
+                liveFrames++;
+                const sc = fr.ms ? fr.ms[0] : 0;
+                stereoConfSum += sc;
+                if (sc > 0.35) hasStereoCount++;
+
+                ld.vocalNorm.push(fr.vDiag[0]);
+                ld.synthNorm.push(fr.vDiag[1]);
+                ld.vocalRatio.push(fr.vDiag[2]);
+                ld.vocalGateSmooth.push(fr.vDiag[3]);
+                ld.maxProm.push(fr.vDiag[4]);
+                ld.maxMod.push(fr.vDiag[6]);
+                ld.maxPVocal.push(fr.vDiag[8]);
+                ld.maxBandRatio.push(fr.vDiag[9]);
+                ld.meanMidDomVoc.push(fr.vDiag[10]);
+                ld.meanSustFrac.push(fr.vDiag[11]);
+
+                ld.kickScore.push(fr.scores[0]);
+                ld.snareScore.push(fr.scores[1]);
+                ld.broadbandSpread.push(fr.scores[3]);
+                ld.broadbandDrumDuck.push(fr.scores[4]);
+                ld.rawVocals.push(fr.raw ? fr.raw[2] : 0);
+
+                if (fr.eb) {
+                    for (let b = 0; b < this._hpssBands; b++) {
+                        bandSum[b] += (fr.eb[b] || 0) / 200;
+                    }
+                }
+            } else {
+                simFrames++;
+            }
+        }
+
+        const bandMeanEb = new Array(this._hpssBands);
+        for (let b = 0; b < this._hpssBands; b++) {
+            bandMeanEb[b] = liveFrames > 0 ? r3(bandSum[b] / liveFrames) : 0;
+        }
+
+        const payload = {
+            meta: {
+                appVersion,
+                capturedAt: rec.startedAtIso || new Date().toISOString(),
+                durationSec,
+                frameCount: nFrames,
+                sampleRate,
+                stemFftSize: this.stemFftSize,
+                stemSmoothing: this.stemAnalyser ? this.stemAnalyser.smoothingTimeConstant : 0.06,
+                inputChannelCount: this._inputChannelCount,
+                trackLabel,
+                trackSettings,
+                hpssBands: this._hpssBands,
+                hpssFrames: this._hpssFrames,
+                bandCentersHz: this._hpssBandRanges.map((r) => r1(r.fc)),
+                bandRanges: this._hpssBandRanges.map((r) => [r.sBin, r.eBin, r.msSBin, r.msEBin]),
+                fieldKeys: {
+                    stems: ['drums', 'bass', 'vocals', 'synths', 'hats'],
+                    td: ['rms', 'peak', 'fluxTDNorm', 'tdTransient', 'tdGate'],
+                    ms: ['stereoConf', 'midTotal', 'sideTotal', 'diffRatio', 'sideRatio'],
+                    scores: ['kickScore', 'snareScore', 'snareBroadGate', 'broadbandSpread', 'broadbandDrumDuck'],
+                    vDiag: [
+                        'vocalNorm', 'synthNorm', 'vocalRatio', 'vocalGateSmooth',
+                        'maxProm', 'meanProm', 'maxMod', 'meanMod',
+                        'maxPVocal', 'maxBandRatio', 'meanMidDomVoc',
+                        'meanSustFrac', 'meanVocBandE', 'meanLocalFloor'
+                    ],
+                    raw: ['rawDrums', 'rawBass', 'rawVocals', 'rawSynths', 'rawHats'],
+                    ebScale: 'value / 200 (clamped 0..1.25)',
+                    mdScale: 'value / 100 (0..1.00 mid/(mid+side))'
+                }
+            },
+            summary: {
+                liveFrames,
+                simFrames,
+                stereoConfAvg: liveFrames > 0 ? r3(stereoConfSum / liveFrames) : 0,
+                hasStereoPct: liveFrames > 0 ? r1((hasStereoCount * 100) / liveFrames) : 0,
+                stems: {
+                    drums: this._summarizeMetric(stemArrays[0]),
+                    bass: this._summarizeMetric(stemArrays[1]),
+                    vocals: this._summarizeMetric(stemArrays[2]),
+                    synths: this._summarizeMetric(stemArrays[3]),
+                    hats: this._summarizeMetric(stemArrays[4])
+                },
+                liveDiag: {
+                    vocalNorm: this._summarizeMetric(ld.vocalNorm),
+                    synthNorm: this._summarizeMetric(ld.synthNorm),
+                    vocalRatio: this._summarizeMetric(ld.vocalRatio),
+                    vocalGateSmooth: this._summarizeMetric(ld.vocalGateSmooth),
+                    broadbandSpread: this._summarizeMetric(ld.broadbandSpread),
+                    broadbandDrumDuck: this._summarizeMetric(ld.broadbandDrumDuck),
+                    kickScore: this._summarizeMetric(ld.kickScore),
+                    snareScore: this._summarizeMetric(ld.snareScore),
+                    maxProm: this._summarizeMetric(ld.maxProm),
+                    maxBandRatio: this._summarizeMetric(ld.maxBandRatio),
+                    maxMod: this._summarizeMetric(ld.maxMod),
+                    maxPVocal: this._summarizeMetric(ld.maxPVocal),
+                    meanMidDomVoc: this._summarizeMetric(ld.meanMidDomVoc),
+                    meanSustFrac: this._summarizeMetric(ld.meanSustFrac),
+                    rawVocals: this._summarizeMetric(ld.rawVocals)
+                },
+                bandMeanEb
+            },
+            markers: rec.markers,
+            frames
+        };
+
+        const now = new Date();
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const filename = 'litestep-stems-log-' +
+            now.getFullYear() + pad2(now.getMonth() + 1) + pad2(now.getDate()) + '-' +
+            pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '.json';
+
+        if (download && typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
+            try {
+                const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+            } catch (err) {
+                console.warn('Failed to trigger stem log download:', err);
+            }
+        }
+
+        const cb = rec.onFinish;
+        rec.onFinish = null;
+        if (cb) {
+            try { cb(payload, filename); } catch (e) { console.warn('Diag onFinish error:', e); }
+        }
+        return { payload, filename };
     }
 }
 

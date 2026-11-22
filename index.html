@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4041</title>
+    <title>LiteStep VJ vers. 4042</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,7 +45,7 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4041</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4042</span></h1>
                     <div class="hud-scene-status">
                         <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
@@ -1233,6 +1233,24 @@
                             • <strong>Space:</strong> Playhead beat/drop flash pulse.<br>
                             • <strong>3D Tilt + Drag:</strong> Orbit deck angle (double-click to reset).
                         </div>
+                    </div>
+
+                    <!-- Stem Diagnostics Log Recorder -->
+                    <div class="prop-group" style="padding: 10px 12px;">
+                        <div class="group-header" style="margin-bottom: 8px;">
+                            <span>🩺 Stem Diagnostics Log</span>
+                        </div>
+                        <button id="btn-stems-diag-rec" class="drawer-action-btn" style="width: 100%; text-align: center; padding: 8px 6px; font-size: 0.75rem;" title="Record up to 30 seconds of raw stem & spectral telemetry and download a JSON log">
+                            ⏺ Record Stem Log (30s)
+                        </button>
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px;">
+                            <button class="diag-tag-btn" data-diag-tag="vocal" disabled title="Mark when vocals are clearly playing">🎤 Vocal</button>
+                            <button class="diag-tag-btn" data-diag-tag="drum" disabled title="Mark when strong drums are playing">🥁 Drum</button>
+                            <button class="diag-tag-btn" data-diag-tag="synth" disabled title="Mark when synths/leads are playing">🎹 Synth</button>
+                            <button class="diag-tag-btn" data-diag-tag="bass" disabled title="Mark when bassline is prominent">🔊 Bass</button>
+                        </div>
+                        <div id="stems-diag-live" class="diag-live-readout">LIVE: waiting for audio update…</div>
+                        <div id="stems-diag-status" class="diag-status-line">Play music &amp; record 15–30s, then share the downloaded JSON log.</div>
                     </div>
                 </div> <!-- End of stems-studio-pane -->
             </div> <!-- End of drawer-scroll-body -->
