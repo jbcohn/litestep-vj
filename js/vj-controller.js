@@ -7,6 +7,9 @@
  *   1 = RidgelineScene (WebGL - THREE.js Joy Division Ribbons)
  *   2 = BubbleScene    (2D canvas - Authentic Iridescent Michel-Lévy Foam)
  *   3 = MountainScene  (WebGL - THREE.js Paraglider Sunset Rolling Terrain)
+ *   4 = DancerScene    (WebGL - THREE.js Liquid Mocap Bubble Dancer)
+ *   5 = FerrofluidScene(WebGL - Phase-Field Magnetic Ferrofluid & Inks)
+ *   6 = StemWaveformScene (2D Canvas / 3D Tilt - Real-Time Serato/Rekordbox Stems)
  */
 
 class VJController {
@@ -25,7 +28,7 @@ class VJController {
         // Two-Counter Director:
         this.counter1 = 0;
         this.counter2 = 0;
-        this.ambientScenes = [5, 0, 1, 2, 3];
+        this.ambientScenes = [5, 6, 0, 1, 2, 3];
 
         this.autoCycleEnabled = false; // ON HOLD by default
         this.timeInCurrentScene = 0;
@@ -86,7 +89,11 @@ class VJController {
         var ferrofluidScene = new FerrofluidScene();
         ferrofluidScene.init(this.threeContainer);
 
-        this.scenes = [mandalaScene, ridgelineScene, bubbleScene, mountainScene, dancerScene, ferrofluidScene];
+        // Scene 6: Real-Time Stem Waveforms (2D Canvas / 3D Tilt)
+        var stemScene = new StemWaveformScene();
+        stemScene.init(this.canvas2D, this.ctx2D);
+
+        this.scenes = [mandalaScene, ridgelineScene, bubbleScene, mountainScene, dancerScene, ferrofluidScene, stemScene];
 
         this.bindEvents();
         this.bindHotkeys();
@@ -237,6 +244,8 @@ class VJController {
         if (current) {
             if (this.activeSceneIdx === 1 || this.activeSceneIdx === 3) {
                 this.cycleTerrain();
+            } else if (this.activeSceneIdx === 6) {
+                if (current.triggerDropPulse) current.triggerDropPulse();
             } else {
                 if (current.randomizeGeometry) current.randomizeGeometry();
                 if (current.switchTerrain)     current.switchTerrain();
@@ -312,6 +321,9 @@ class VJController {
             } else if (this.activeSceneIdx === 5 && activeScene && activeScene.palettes && activeScene.params) {
                 var curPal = activeScene.palettes[activeScene.params.paletteIdx];
                 btnTerrain.textContent = "Ink: " + (curPal ? curPal.name : "Orange") + " (M)";
+            } else if (this.activeSceneIdx === 6 && activeScene && activeScene.palettes && activeScene.params) {
+                var curStemPal = activeScene.palettes[activeScene.params.paletteIdx];
+                btnTerrain.textContent = "Theme: " + (curStemPal ? curStemPal.name : "Serato Pro") + " (M)";
             } else {
                 if (activeScene && activeScene.currentTerrainIdx !== undefined) {
                     this.terrainIdx = activeScene.currentTerrainIdx;
@@ -323,8 +335,8 @@ class VJController {
 
         var btnProp = document.getElementById("btn-proportions");
         if (btnProp) {
-            var icons = ["🌀", "📈", "🫧", "🏔️", "📐", "🧲"];
-            var labels = ["Mandala Form Constants", "Topographic Ridgelines", "Soap Bubble Surface", "Mountain Sunset Flight", "Dancer Proportions", "Ferrofluid Physics Lab"];
+            var icons = ["🌀", "📈", "🫧", "🏔️", "📐", "🧲", "🎚️"];
+            var labels = ["Mandala Form Constants", "Topographic Ridgelines", "Soap Bubble Surface", "Mountain Sunset Flight", "Dancer Proportions", "Ferrofluid Physics Lab", "Stem Waveforms Studio"];
             var label = (this.activeSceneIdx === 5) ? "🧲 Lab (P)" : (icons[this.activeSceneIdx] || "📐") + " Studio (P)";
             btnProp.innerHTML = label;
             btnProp.title = (labels[this.activeSceneIdx] || "Scene") + " Studio (P)";
@@ -621,6 +633,10 @@ class VJController {
                 } else if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].mutate) {
                     this.scenes[5].mutate();
                     this.updateHUD();
+                } else if (this.activeSceneIdx === 6 && this.scenes[6] && this.scenes[6].cyclePalette) {
+                    this.scenes[6].cyclePalette();
+                    this.syncStemsUI();
+                    this.updateHUD();
                 } else {
                     if (e.shiftKey) {
                         this.cycleMountainCadence();
@@ -640,6 +656,7 @@ class VJController {
                 if (this.scenes[0] && this.scenes[0].setThickness) this.scenes[0].setThickness(val);
                 if (this.scenes[1] && this.scenes[1].setThickness) this.scenes[1].setThickness(val);
                 if (this.scenes[5] && this.scenes[5].setThickness) this.scenes[5].setThickness(val);
+                if (this.scenes[6] && this.scenes[6].setThickness) this.scenes[6].setThickness(val);
             });
         }
 
@@ -749,6 +766,7 @@ class VJController {
             else if (e.code === "Digit4") this.setScene(3);
             else if (e.code === "Digit5") this.setScene(4);
             else if (e.code === "Digit6") this.setScene(5);
+            else if (e.code === "Digit7") this.setScene(6);
             else if (e.code === "KeyL") { e.preventDefault(); this.toggleSceneLock(); }
             else if (e.code === "KeyX") { e.preventDefault(); this.toggleMirrorDisplay(); }
             else if (e.code === "KeyT") {
@@ -761,6 +779,10 @@ class VJController {
                     this.scenes[4].cycleOutfit();
                 } else if (this.activeSceneIdx === 5 && this.scenes[5] && this.scenes[5].mutate) {
                     this.scenes[5].mutate();
+                    this.updateHUD();
+                } else if (this.activeSceneIdx === 6 && this.scenes[6] && this.scenes[6].cyclePalette) {
+                    this.scenes[6].cyclePalette();
+                    this.syncStemsUI();
                     this.updateHUD();
                 } else {
                     this.cycleTerrain();
@@ -831,7 +853,8 @@ class VJController {
             "bubbles-studio-pane",
             "mountain-studio-pane",
             "dancer-studio-pane",
-            "ferrofluid-studio-pane"
+            "ferrofluid-studio-pane",
+            "stems-studio-pane"
         ];
 
         paneIds.forEach((id, i) => {
@@ -870,12 +893,17 @@ class VJController {
             if (title) title.textContent = "Ferrofluid Physics Lab";
             if (subtitle) subtitle.textContent = "Real-Time Magnetic Hydrodynamics Studio";
             this.syncFerrofluidUI();
+        } else if (sceneIdx === 6) {
+            if (icon) icon.textContent = "🎚️";
+            if (title) title.textContent = "Stem Waveforms Studio";
+            if (subtitle) subtitle.textContent = "Real-Time Serato/Rekordbox Stems & Bar Cycle";
+            this.syncStemsUI();
         }
 
         var btnProp = document.getElementById("btn-proportions");
         if (btnProp) {
-            var icons = ["🌀", "📈", "🫧", "🏔️", "📐", "🧲"];
-            var labels = ["Mandala", "Ridges", "Bubbles", "Mountain", "Dancer", "Ferrofluid"];
+            var icons = ["🌀", "📈", "🫧", "🏔️", "📐", "🧲", "🎚️"];
+            var labels = ["Mandala", "Ridges", "Bubbles", "Mountain", "Dancer", "Ferrofluid", "Stems"];
             var label = (sceneIdx === 5) ? "🧲 Lab (P)" : (icons[sceneIdx] || "📐") + " Studio (P)";
             btnProp.innerHTML = label;
             btnProp.title = (labels[sceneIdx] || "Scene") + " Studio Drawer (P)";
@@ -1082,6 +1110,66 @@ class VJController {
                 if (hexVal) hexVal.textContent = inkData.hex.toUpperCase();
             }
         }
+    }
+
+    /** Stem Waveforms Studio slider definitions (shared by binding and sync). */
+    _stemsSliderMap() {
+        return [
+            { id: "slider-stems-tilt",     valId: "val-stems-tilt",     key: "tiltAngle",       prec: 0, suffix: "°", scale: 1 },
+            { id: "slider-stems-forecast", valId: "val-stems-forecast", key: "forecastOpacity", prec: 0, suffix: "%", scale: 100 },
+            { id: "slider-stems-speed",    valId: "val-stems-speed",    key: "scrollSpeed",     prec: 1, suffix: "x", scale: 1 },
+            { id: "slider-stems-gain",     valId: "val-stems-gain",     key: "gain",            prec: 1, suffix: "x", scale: 1 },
+            { id: "slider-stems-glow",     valId: "val-stems-glow",     key: "glow",            prec: 1, suffix: "x", scale: 1 }
+        ];
+    }
+
+    syncStemsUI() {
+        var stemsScene = this.scenes[6];
+        if (!stemsScene) return;
+
+        var p = stemsScene.params;
+
+        document.querySelectorAll("#stems-count-control .seg-btn").forEach((btn) => {
+            btn.classList.toggle("active", parseInt(btn.getAttribute("data-count"), 10) === p.stemCount);
+        });
+        document.querySelectorAll("#stems-bars-control .seg-btn").forEach((btn) => {
+            btn.classList.toggle("active", parseInt(btn.getAttribute("data-bars"), 10) === p.cycleBars);
+        });
+        document.querySelectorAll("#stems-view-control .seg-btn").forEach((btn) => {
+            var is3D = btn.getAttribute("data-view") === "3d";
+            btn.classList.toggle("active", is3D === !!p.view3D);
+        });
+
+        var selWave = document.getElementById("stems-wavestyle-select");
+        if (selWave) selWave.value = p.waveStyle;
+
+        var selPal = document.getElementById("stems-palette-select");
+        if (selPal) selPal.value = String(p.paletteIdx);
+
+        var selCycle = document.getElementById("stems-cyclemode-select");
+        if (selCycle) selCycle.value = p.cycleMode;
+
+        var selTrans = document.getElementById("stems-transition-select");
+        if (selTrans) selTrans.value = p.transitionStyle;
+
+        var selPh = document.getElementById("stems-playhead-select");
+        if (selPh) selPh.value = p.playheadMode;
+
+        this._stemsSliderMap().forEach((item) => {
+            var slider = document.getElementById(item.id);
+            var valEl = document.getElementById(item.valId);
+            var rawVal = p[item.key];
+            if (rawVal === undefined) return;
+            var uiVal = rawVal * (item.scale || 1);
+            if (slider) slider.value = uiVal;
+            if (valEl) valEl.textContent = Number(uiVal).toFixed(item.prec) + (item.suffix || "");
+        });
+
+        var cbGrid = document.getElementById("check-stems-grid");
+        if (cbGrid) cbGrid.checked = !!p.showGrid;
+
+        var cbLabels = document.getElementById("check-stems-labels");
+        if (cbLabels) cbLabels.checked = !!p.showLabels;
     }
 
     syncProportionsUI() {
@@ -1460,6 +1548,11 @@ class VJController {
                     };
                     codeStr = "// Ferrofluid Physics Parameters:\nthis.ferroConfig = " + JSON.stringify(fObj, null, 4) + ";";
                     toastText = "Copied ferrofluid physics parameters to clipboard!";
+                } else if (this.activeSceneIdx === 6) {
+                    var stemsScene = this.scenes[6];
+                    if (!stemsScene) return;
+                    codeStr = "// Stem Waveforms Configuration:\nthis.stemsConfig = " + JSON.stringify(stemsScene.params, null, 4) + ";";
+                    toastText = "Copied Stem Waveforms configuration to clipboard!";
                 } else {
                     var dancerScene = this.scenes[4];
                     if (!dancerScene) return;
@@ -1525,6 +1618,13 @@ class VJController {
                         if (ferroScene.reseed) ferroScene.reseed("labyrinth", true);
                         if (ferroScene.resetCamera) ferroScene.resetCamera();
                         this.syncFerrofluidUI();
+                    }
+                } else if (this.activeSceneIdx === 6) {
+                    var stemsScene = this.scenes[6];
+                    if (stemsScene) {
+                        if (stemsScene.resetDefaults) stemsScene.resetDefaults();
+                        this.syncStemsUI();
+                        this.updateHUD();
                     }
                 } else {
                     var config = presets["default"];
@@ -2065,6 +2165,135 @@ class VJController {
                 }
                 btnFerroCenter.classList.add("pulse");
                 setTimeout(() => btnFerroCenter.classList.remove("pulse"), 250);
+            });
+        }
+
+        // ==============================================================
+        // Stem Waveforms Studio Controls Bindings
+        // ==============================================================
+        document.querySelectorAll("#stems-count-control .seg-btn").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                var count = parseInt(e.currentTarget.getAttribute("data-count"), 10);
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("stemCount", count);
+                this.syncStemsUI();
+            });
+        });
+
+        document.querySelectorAll("#stems-bars-control .seg-btn").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                var bars = parseInt(e.currentTarget.getAttribute("data-bars"), 10);
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("cycleBars", bars);
+                this.syncStemsUI();
+            });
+        });
+
+        document.querySelectorAll("#stems-view-control .seg-btn").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                var is3D = e.currentTarget.getAttribute("data-view") === "3d";
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("view3D", is3D);
+                this.syncStemsUI();
+            });
+        });
+
+        var stemsWaveSel = document.getElementById("stems-wavestyle-select");
+        if (stemsWaveSel) {
+            stemsWaveSel.addEventListener("change", (e) => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("waveStyle", e.target.value);
+            });
+        }
+
+        var stemsPalSel = document.getElementById("stems-palette-select");
+        if (stemsPalSel) {
+            stemsPalSel.addEventListener("change", (e) => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setPalette) {
+                    stemsScene.setPalette(parseInt(e.target.value, 10));
+                    this.updateHUD();
+                }
+            });
+        }
+
+        var stemsCycleSel = document.getElementById("stems-cyclemode-select");
+        if (stemsCycleSel) {
+            stemsCycleSel.addEventListener("change", (e) => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("cycleMode", e.target.value);
+            });
+        }
+
+        var stemsTransSel = document.getElementById("stems-transition-select");
+        if (stemsTransSel) {
+            stemsTransSel.addEventListener("change", (e) => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("transitionStyle", e.target.value);
+            });
+        }
+
+        var stemsPhSel = document.getElementById("stems-playhead-select");
+        if (stemsPhSel) {
+            stemsPhSel.addEventListener("change", (e) => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("playheadMode", e.target.value);
+            });
+        }
+
+        this._stemsSliderMap().forEach((item) => {
+            var slider = document.getElementById(item.id);
+            if (slider) {
+                slider.addEventListener("input", (e) => {
+                    var uiVal = parseFloat(e.target.value);
+                    var valEl = document.getElementById(item.valId);
+                    if (valEl) valEl.textContent = uiVal.toFixed(item.prec) + (item.suffix || "");
+                    var stemsScene = this.scenes[6];
+                    if (stemsScene && stemsScene.setParam) {
+                        stemsScene.setParam(item.key, uiVal / (item.scale || 1));
+                    }
+                });
+            }
+        });
+
+        var cbStemsGrid = document.getElementById("check-stems-grid");
+        if (cbStemsGrid) {
+            cbStemsGrid.addEventListener("change", (e) => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("showGrid", e.target.checked);
+            });
+        }
+
+        var cbStemsLabels = document.getElementById("check-stems-labels");
+        if (cbStemsLabels) {
+            cbStemsLabels.addEventListener("change", (e) => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.setParam) stemsScene.setParam("showLabels", e.target.checked);
+            });
+        }
+
+        var btnStemsSplit = document.getElementById("btn-stems-split-now");
+        if (btnStemsSplit) {
+            btnStemsSplit.addEventListener("click", () => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.toggleSplitNow) {
+                    stemsScene.toggleSplitNow();
+                    this.syncStemsUI();
+                }
+                btnStemsSplit.classList.add("pulse");
+                setTimeout(() => btnStemsSplit.classList.remove("pulse"), 220);
+            });
+        }
+
+        var btnStemsResync = document.getElementById("btn-stems-resync");
+        if (btnStemsResync) {
+            btnStemsResync.addEventListener("click", () => {
+                var stemsScene = this.scenes[6];
+                if (stemsScene && stemsScene.resyncDownbeat) {
+                    stemsScene.resyncDownbeat();
+                }
+                btnStemsResync.classList.add("pulse");
+                setTimeout(() => btnStemsResync.classList.remove("pulse"), 220);
             });
         }
 

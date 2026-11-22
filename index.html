@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LiteStep VJ vers. 4038</title>
+    <title>LiteStep VJ vers. 4039</title>
     
     <!-- Disable Caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -45,7 +45,7 @@
             <div class="hud-section">
                 <div id="beat-indicator" title="Beat Transient Detected"></div>
                 <div class="hud-title">
-                    <h1>LiteStep VJ <span class="app-version">vers. 4038</span></h1>
+                    <h1>LiteStep VJ <span class="app-version">vers. 4039</span></h1>
                     <div class="hud-scene-status">
                         <span id="current-scene-name">Ferrofluid &amp; Inks</span>
                         <span id="musical-state-badge" class="musical-state-badge state-groove" title="Dance Structure &amp; Tension State">GROOVE</span>
@@ -101,6 +101,9 @@
                         <button class="scene-btn active" data-scene="5">
                             <span class="key-badge">6</span> Ferrofluid
                         </button>
+                        <button class="scene-btn" data-scene="6">
+                            <span class="key-badge">7</span> Stems
+                        </button>
                     </div>
                     <button id="btn-scene-lock" class="vj-btn lock-btn locked" title="Scene is LOCKED (staying on this scene). Press L to auto-cycle">
                         <span id="lock-icon">🔒</span> <span id="lock-label">Hold</span>
@@ -108,7 +111,7 @@
                 </div>
                 <div class="hud-hotkeys-subbar">
                     <span><strong>Space</strong>: Mutate</span> &bull; 
-                    <span><strong>1&ndash;6</strong>: Scenes</span> &bull; 
+                    <span><strong>1&ndash;7</strong>: Scenes</span> &bull; 
                     <span><strong>L</strong>: Hold Scene</span> &bull; 
                     <span><strong>X</strong>: Rear Mirror</span> &bull; 
                     <span><strong>F</strong>: Hide UI</span> &bull; 
@@ -1070,6 +1073,167 @@
                         </div>
                     </div>
                 </div> <!-- End of ferrofluid-studio-pane -->
+
+                <!-- ============================================================== -->
+                <!-- PANE 7: STEM WAVEFORMS STUDIO                                  -->
+                <!-- ============================================================== -->
+                <div id="stems-studio-pane" style="display: none;">
+                    <!-- Stems Count & Cycle Bars -->
+                    <div class="prop-group" style="margin-bottom: 10px;">
+                        <div class="group-header">
+                            <span>🎚️ Stems &amp; Bar Cycle</span>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <span class="section-label">Stems Separation Count</span>
+                            <div class="segmented-control" id="stems-count-control">
+                                <button class="seg-btn" data-count="3">3 Stems</button>
+                                <button class="seg-btn active" data-count="4">4 Stems</button>
+                                <button class="seg-btn" data-count="5">5 Stems</button>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <span class="section-label">Split → Merge Cycle Length</span>
+                            <div class="segmented-control" id="stems-bars-control">
+                                <button class="seg-btn" data-bars="4">4 Bars</button>
+                                <button class="seg-btn" data-bars="8">8 Bars</button>
+                                <button class="seg-btn active" data-bars="16">16 Bars</button>
+                                <button class="seg-btn" data-bars="32">32 Bars</button>
+                                <button class="seg-btn" data-bars="64">64 Bars</button>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <span class="section-label">Stage Perspective</span>
+                            <div class="segmented-control" id="stems-view-control">
+                                <button class="seg-btn active" data-view="2d">2D Deck</button>
+                                <button class="seg-btn" data-view="3d">3D Tilt</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Waveform Styles & Transitions -->
+                    <div class="drawer-section dropdowns-section" style="margin-bottom: 10px;">
+                        <div class="dropdown-row">
+                            <div class="dropdown-item">
+                                <label class="section-label" for="stems-wavestyle-select">Waveform Engine</label>
+                                <select id="stems-wavestyle-select" class="drawer-dropdown">
+                                    <option value="serato" selected>Serato RGB</option>
+                                    <option value="rekordbox">Rekordbox 3-Band</option>
+                                    <option value="neon">Neon Oscilloscope</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="stems-palette-select">Color Palette</label>
+                                <select id="stems-palette-select" class="drawer-dropdown">
+                                    <option value="0" selected>0: Serato Pro</option>
+                                    <option value="1">1: Rekordbox Studio</option>
+                                    <option value="2">2: Cyberpunk Neon</option>
+                                    <option value="3">3: Prism Spectrum</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="dropdown-row" style="margin-top: 8px;">
+                            <div class="dropdown-item">
+                                <label class="section-label" for="stems-cyclemode-select">Cycle Mode</label>
+                                <select id="stems-cyclemode-select" class="drawer-dropdown">
+                                    <option value="auto" selected>Auto Bar Cycle</option>
+                                    <option value="musical">Musical State Sync</option>
+                                    <option value="hold_merged">Hold Merged</option>
+                                    <option value="hold_split">Hold Split</option>
+                                </select>
+                            </div>
+                            <div class="dropdown-item">
+                                <label class="section-label" for="stems-transition-select">Split Animation</label>
+                                <select id="stems-transition-select" class="drawer-dropdown">
+                                    <option value="prism" selected>Prism Unzip</option>
+                                    <option value="peel">Whole-Staff Peel</option>
+                                    <option value="snap">Bar-Snap Elastic</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="dropdown-row" style="margin-top: 8px;">
+                            <div class="dropdown-item full-width">
+                                <label class="section-label" for="stems-playhead-select">Playhead &amp; Forecast Layout</label>
+                                <select id="stems-playhead-select" class="drawer-dropdown">
+                                    <option value="forecast" selected>Center Playhead + Bar-Loop Forecast</option>
+                                    <option value="right">Right Playhead (84% History / 16% Forecast)</option>
+                                    <option value="center_mirror">Center Playhead + Symmetry Mirror</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fine Tuning Sliders -->
+                    <div class="prop-group" style="margin-bottom: 10px;">
+                        <div class="group-header">
+                            <span>🎛️ Optics, Scroll &amp; Forecast</span>
+                        </div>
+
+                        <div class="prop-row" title="Perspective pitch angle when 3D Tilt is active">
+                            <span class="prop-label">3D Tilt Pitch</span>
+                            <input type="range" class="prop-slider" id="slider-stems-tilt" min="0" max="55" step="1" value="32">
+                            <span class="prop-val" id="val-stems-tilt">32°</span>
+                        </div>
+
+                        <div class="prop-row" title="Opacity of the bar-loop predicted future waveform ahead of the playhead">
+                            <span class="prop-label">Forecast Alpha</span>
+                            <input type="range" class="prop-slider" id="slider-stems-forecast" min="0" max="70" step="5" value="35">
+                            <span class="prop-val" id="val-stems-forecast">35%</span>
+                        </div>
+
+                        <div class="prop-row" title="Waveform horizontal scroll velocity">
+                            <span class="prop-label">Scroll Speed</span>
+                            <input type="range" class="prop-slider" id="slider-stems-speed" min="0.5" max="2.5" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-stems-speed">1.0x</span>
+                        </div>
+
+                        <div class="prop-row" title="Vertical waveform amplitude multiplier">
+                            <span class="prop-label">Waveform Gain</span>
+                            <input type="range" class="prop-slider" id="slider-stems-gain" min="0.5" max="2.5" step="0.1" value="1.2">
+                            <span class="prop-val" id="val-stems-gain">1.2x</span>
+                        </div>
+
+                        <div class="prop-row" title="Additive radiance and playhead laser bloom">
+                            <span class="prop-label">Stem Glow</span>
+                            <input type="range" class="prop-slider" id="slider-stems-glow" min="0.0" max="2.0" step="0.1" value="1.0">
+                            <span class="prop-val" id="val-stems-glow">1.0x</span>
+                        </div>
+
+                        <div class="prop-row" style="justify-content: space-between;">
+                            <label class="prop-label" for="check-stems-grid" style="width: auto; cursor: pointer;">Beatgrid &amp; Bar Markers</label>
+                            <input type="checkbox" id="check-stems-grid" checked style="width: 16px; height: 16px; accent-color: #38bdf8; cursor: pointer;">
+                        </div>
+
+                        <div class="prop-row" style="justify-content: space-between;">
+                            <label class="prop-label" for="check-stems-labels" style="width: auto; cursor: pointer;">Stem Badges &amp; Cycle Pill</label>
+                            <input type="checkbox" id="check-stems-labels" checked style="width: 16px; height: 16px; accent-color: #38bdf8; cursor: pointer;">
+                        </div>
+                    </div>
+
+                    <!-- Live Performance Actions -->
+                    <div class="prop-group" style="padding: 10px 12px;">
+                        <div class="group-header" style="margin-bottom: 8px;">
+                            <span>⚡ Performance Controls</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <button id="btn-stems-split-now" class="drawer-action-btn highlight" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Immediately trigger Split or Merge transition">
+                                ⚡ Split / Merge Now
+                            </button>
+                            <button id="btn-stems-resync" class="drawer-action-btn" style="text-align:center; padding:8px 4px; font-size:0.75rem;" title="Snap Bar 1 downbeat and restart cycle aligned to right now">
+                                🥁 Resync Bar 1
+                            </button>
+                        </div>
+                        <div class="dance-checklist-desc" style="margin-top: 10px; font-size: 0.70rem; color: #94a3b8; line-height: 1.4;">
+                            • <strong>M / Button:</strong> Cycle stem color theme.<br>
+                            • <strong>Space:</strong> Playhead beat/drop flash pulse.<br>
+                            • <strong>3D Tilt + Drag:</strong> Orbit deck angle (double-click to reset).
+                        </div>
+                    </div>
+                </div> <!-- End of stems-studio-pane -->
             </div> <!-- End of drawer-scroll-body -->
 
             <!-- Toast Notification -->
@@ -1096,6 +1260,7 @@
                 "js/scene-mountain.js",
                 "js/scene-dancer.js",
                 "js/scene-ferrofluid.js",
+                "js/scene-stems.js",
                 "js/vj-controller.js"
             ];
             for (var i = 0; i < scripts.length; i++) {

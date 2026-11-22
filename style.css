@@ -476,7 +476,33 @@ html, body {
     background: rgba(56, 189, 248, 0.4) !important;
 }
 
-/* Mobile / Small Screen Adjustments */
+/* Mobile / Small & Medium Screen Adjustments */
+@media (max-width: 1560px) {
+    #vj-hud {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px 10px;
+        padding: 7px 12px;
+        bottom: 12px;
+    }
+}
+
+@media (max-width: 1360px) {
+    #vj-hud {
+        gap: 5px 8px;
+        padding: 6px 10px;
+        bottom: 10px;
+    }
+    .scene-btn {
+        padding: 3px 6px;
+        font-size: 0.68rem;
+    }
+    .vj-btn {
+        padding: 4px 7px;
+        font-size: 0.68rem;
+    }
+}
+
 @media (max-width: 1100px) {
     #vj-hud {
         padding: 6px 10px;

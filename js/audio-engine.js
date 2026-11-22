@@ -75,6 +75,68 @@ class AudioEngine {
         // Simulation State
         this.simTime = 0;
         this.simBeatCounter = 0;
+        this.totalBeats = 0;
+        this._simBarOffset = 0;
+
+        // High-Resolution Real-Time Stem Separation (DSP Hybrid: HPSS + Mid/Side + Bands)
+        this.stemFftSize = 2048;
+        this.stemAnalyser = null;
+        this.stemFreqData = null;
+        this.stemTimeData = null;
+        this.splitter = null;
+        this.midGainL = null;
+        this.midGainR = null;
+        this.sideGainL = null;
+        this.sideGainR = null;
+        this.analyserMid = null;
+        this.analyserSide = null;
+        this.midFreqData = null;
+        this.sideFreqData = null;
+        this.hasStereo = false;
+        this.stereoConfidence = 0;
+        this._inputChannelCount = 2;
+
+        this._hpssBands = 64;
+        this._hpssFrames = 12;
+        this._hpssHistory = new Float32Array(this._hpssBands * this._hpssFrames);
+        this._hpssWriteIdx = 0;
+        this._hpssFilled = 0;
+        this._hpssBandRanges = null;
+        this._hpssCurrent = new Float32Array(this._hpssBands);
+        this._hpssTemporal = new Float32Array(this._hpssBands);
+        this._hpssHarm = new Float32Array(this._hpssBands);
+        this._hpssPerc = new Float32Array(this._hpssBands);
+        this._hpssSortTmp = new Float32Array(this._hpssFrames);
+
+        this.stems = {
+            drums: 0,
+            bass: 0,
+            vocals: 0,
+            synths: 0,
+            air: 0,
+            low: 0,
+            mid: 0,
+            high: 0,
+            composite: 0,
+            detail: 0
+        };
+    }
+
+    _buildHpssBands(sampleRate) {
+        const nyquist = (sampleRate || 44100) / 2;
+        const binCount = this.stemFreqData ? this.stemFreqData.length : (this.stemFftSize / 2);
+        const binHz = nyquist / binCount;
+        const fMin = 30;
+        const fMax = Math.min(16000, nyquist * 0.96);
+        const ranges = new Array(this._hpssBands);
+        for (let b = 0; b < this._hpssBands; b++) {
+            const f0 = fMin * Math.pow(fMax / fMin, b / this._hpssBands);
+            const f1 = fMin * Math.pow(fMax / fMin, (b + 1) / this._hpssBands);
+            const sBin = Math.max(1, Math.floor(f0 / binHz));
+            const eBin = Math.min(binCount - 1, Math.max(sBin, Math.ceil(f1 / binHz)));
+            ranges[b] = { sBin, eBin, fc: Math.sqrt(f0 * f1) };
+        }
+        this._hpssBandRanges = ranges;
     }
 
     async init() {
@@ -86,6 +148,44 @@ class AudioEngine {
             this.analyser.smoothingTimeConstant = this.smoothing;
             this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
             this.timeDomainData = new Uint8Array(this.analyser.fftSize);
+
+            // Dedicated fast-response analyser + Mid/Side splitter for real-time stem separation
+            this.stemAnalyser = this.audioCtx.createAnalyser();
+            this.stemAnalyser.fftSize = this.stemFftSize;
+            this.stemAnalyser.smoothingTimeConstant = 0.22;
+            this.stemFreqData = new Uint8Array(this.stemAnalyser.frequencyBinCount);
+            this.stemTimeData = new Uint8Array(this.stemAnalyser.fftSize);
+
+            this.splitter = this.audioCtx.createChannelSplitter(2);
+            this.midGainL = this.audioCtx.createGain();
+            this.midGainR = this.audioCtx.createGain();
+            this.sideGainL = this.audioCtx.createGain();
+            this.sideGainR = this.audioCtx.createGain();
+            this.midGainL.gain.value = 0.5;
+            this.midGainR.gain.value = 0.5;
+            this.sideGainL.gain.value = 0.5;
+            this.sideGainR.gain.value = -0.5;
+
+            this.analyserMid = this.audioCtx.createAnalyser();
+            this.analyserMid.fftSize = 512;
+            this.analyserMid.smoothingTimeConstant = 0.25;
+            this.analyserSide = this.audioCtx.createAnalyser();
+            this.analyserSide.fftSize = 512;
+            this.analyserSide.smoothingTimeConstant = 0.25;
+            this.midFreqData = new Uint8Array(this.analyserMid.frequencyBinCount);
+            this.sideFreqData = new Uint8Array(this.analyserSide.frequencyBinCount);
+
+            this.splitter.connect(this.midGainL, 0);
+            this.splitter.connect(this.midGainR, 1);
+            this.midGainL.connect(this.analyserMid);
+            this.midGainR.connect(this.analyserMid);
+
+            this.splitter.connect(this.sideGainL, 0);
+            this.splitter.connect(this.sideGainR, 1);
+            this.sideGainL.connect(this.analyserSide);
+            this.sideGainR.connect(this.analyserSide);
+
+            this._buildHpssBands(this.audioCtx.sampleRate);
             return true;
         } catch (e) {
             console.warn("Web Audio API not supported:", e);
@@ -105,17 +205,37 @@ class AudioEngine {
                 this.mediaStream.getTracks().forEach(track => track.stop());
             }
 
-            const constraints = {
-                audio: deviceId ? { deviceId: { exact: deviceId } } : true
+            const rawAudioOpts = {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false
             };
+            if (deviceId) rawAudioOpts.deviceId = { exact: deviceId };
 
-            this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+            try {
+                this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: rawAudioOpts });
+            } catch (rawErr) {
+                const fallbackConstraints = {
+                    audio: deviceId ? { deviceId: { exact: deviceId } } : true
+                };
+                this.mediaStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+            }
+
             if (this.source) {
                 this.source.disconnect();
             }
 
             this.source = this.audioCtx.createMediaStreamSource(this.mediaStream);
             this.source.connect(this.analyser);
+            if (this.stemAnalyser) this.source.connect(this.stemAnalyser);
+            if (this.splitter) this.source.connect(this.splitter);
+
+            const tracks = this.mediaStream.getAudioTracks();
+            const chCount = (tracks[0] && tracks[0].getSettings && tracks[0].getSettings().channelCount) || 2;
+            this._inputChannelCount = chCount;
+            this.hasStereo = chCount >= 2;
+            this.stereoConfidence = 0;
+
             this.isListening = true;
             this.useSimulation = false;
             console.log("Audio input connected successfully.");
@@ -138,6 +258,8 @@ class AudioEngine {
             this.source = null;
         }
         this.isListening = false;
+        this.hasStereo = false;
+        this.stereoConfidence = 0;
     }
 
     async getAudioInputDevices() {
@@ -200,16 +322,369 @@ class AudioEngine {
         return this.bpm;
     }
 
+    resetBarPhase() {
+        if (this.useSimulation) {
+            const beatFreq = Math.max(40, this.bpm) / 60;
+            const rawBeats = this.simTime * beatFreq;
+            const snapped = Math.round((rawBeats + this._simBarOffset) / 4) * 4;
+            this._simBarOffset = snapped - rawBeats;
+            this.totalBeats = snapped;
+        } else {
+            this.totalBeats = Math.round(this.totalBeats / 4) * 4;
+        }
+        this.beatPhase = 0;
+    }
+
+    _smoothStem(prev, target, attack, decay) {
+        return target > prev ? prev + (target - prev) * attack : prev + (target - prev) * decay;
+    }
+
+    _updateLiveStems(dt) {
+        if (!this.stemAnalyser || !this.stemFreqData || !this.stemTimeData) return;
+
+        this.stemAnalyser.getByteFrequencyData(this.stemFreqData);
+        this.stemAnalyser.getByteTimeDomainData(this.stemTimeData);
+
+        const sampleRate = this.audioCtx.sampleRate || 44100;
+        if (!this._hpssBandRanges) {
+            this._buildHpssBands(sampleRate);
+        }
+
+        // Time-domain RMS, peak & high-frequency detail
+        const td = this.stemTimeData;
+        let sumSq = 0, peak = 0, fluxTD = 0;
+        let prevV = (td[0] - 128) / 128;
+        for (let i = 0; i < td.length; i++) {
+            const v = (td[i] - 128) / 128;
+            sumSq += v * v;
+            const av = v < 0 ? -v : v;
+            if (av > peak) peak = av;
+            fluxTD += Math.abs(v - prevV);
+            prevV = v;
+        }
+        const rms = Math.sqrt(sumSq / td.length);
+        const rawComposite = Math.min(1.0, (rms * 1.65 + peak * 0.45) * this.sensitivity);
+        const rawDetail = Math.min(1.0, (fluxTD / td.length) * 2.4 * this.sensitivity);
+
+        // Crisp 3-band instantaneous extraction for Serato/Rekordbox unified waveform
+        const freq = this.stemFreqData;
+        const binHz = (sampleRate * 0.5) / freq.length;
+        const getCrispBand = (fMin, fMax) => {
+            const sBin = Math.max(0, Math.floor(fMin / binHz));
+            const eBin = Math.min(freq.length - 1, Math.ceil(fMax / binHz));
+            let bSq = 0, bPeak = 0;
+            const count = Math.max(1, eBin - sBin + 1);
+            for (let i = sBin; i <= eBin; i++) {
+                const v = freq[i] / 255;
+                bSq += v * v;
+                if (v > bPeak) bPeak = v;
+            }
+            const bRms = Math.sqrt(bSq / count);
+            return Math.min(1.0, (bRms * 0.72 + bPeak * 0.28) * this.sensitivity);
+        };
+
+        const rawLow = getCrispBand(20, 250);
+        const rawMid = getCrispBand(250, 2500);
+        const rawHigh = getCrispBand(2500, Math.min(14000, sampleRate * 0.45));
+
+        // Populate 64 log-spaced HPSS bands
+        const nBands = this._hpssBands;
+        const ranges = this._hpssBandRanges;
+        for (let b = 0; b < nBands; b++) {
+            const r = ranges[b];
+            let bSq = 0, bPeak = 0;
+            const count = Math.max(1, r.eBin - r.sBin + 1);
+            for (let i = r.sBin; i <= r.eBin; i++) {
+                const v = freq[i] / 255;
+                bSq += v * v;
+                if (v > bPeak) bPeak = v;
+            }
+            const bVal = (Math.sqrt(bSq / count) * 0.7 + bPeak * 0.3) * this.sensitivity;
+            this._hpssCurrent[b] = Math.min(1.25, bVal);
+        }
+
+        // Write current frame into HPSS ring buffer
+        const writeOffset = this._hpssWriteIdx * nBands;
+        this._hpssHistory.set(this._hpssCurrent, writeOffset);
+        this._hpssWriteIdx = (this._hpssWriteIdx + 1) % this._hpssFrames;
+        if (this._hpssFilled < this._hpssFrames) this._hpssFilled++;
+
+        // Causal temporal median vs spectral neighborhood for Harmonic/Percussive masks
+        const filled = this._hpssFilled;
+        const tmp = this._hpssSortTmp;
+        const medIdx = Math.floor((filled - 1) * 0.45);
+        for (let b = 0; b < nBands; b++) {
+            for (let f = 0; f < filled; f++) {
+                const val = this._hpssHistory[f * nBands + b];
+                let j = f - 1;
+                while (j >= 0 && tmp[j] > val) {
+                    tmp[j + 1] = tmp[j];
+                    j--;
+                }
+                tmp[j + 1] = val;
+            }
+            const Tb = tmp[medIdx];
+            this._hpssTemporal[b] = Tb;
+
+            const j0 = Math.max(0, b - 3);
+            const j1 = Math.min(nBands - 1, b + 3);
+            let sSum = 0;
+            for (let j = j0; j <= j1; j++) sSum += this._hpssCurrent[j];
+            const Sb = sSum / (j1 - j0 + 1);
+
+            const Eb = this._hpssCurrent[b];
+            const s2 = Sb * Sb;
+            const t2 = Tb * Tb;
+            const mPerc = s2 / (s2 + t2 + 1e-5);
+            const mHarm = 1.0 - mPerc;
+
+            this._hpssPerc[b] = Math.max(0, Eb - 0.82 * Tb) * (0.45 + 0.55 * mPerc) + 0.2 * Eb * mPerc;
+            this._hpssHarm[b] = Math.min(Eb, Tb * 1.15) * (0.35 + 0.65 * mHarm) + 0.2 * Eb * mHarm;
+        }
+
+        // Optional stereo Mid/Side weighting for Vocal (center) vs Synth (wide) separation
+        let vocalMidWeight = 1.0;
+        let synthSideWeight = 1.0;
+        if (this.analyserMid && this.analyserSide && this.midFreqData && this.sideFreqData && this._inputChannelCount >= 2) {
+            this.analyserMid.getByteFrequencyData(this.midFreqData);
+            this.analyserSide.getByteFrequencyData(this.sideFreqData);
+
+            const msBinHz = (sampleRate * 0.5) / this.midFreqData.length;
+            let midTotal = 0, sideTotal = 0;
+            let midVocal = 0, sideVocal = 0;
+            let midSynth = 0, sideSynth = 0;
+            const bStart = Math.max(1, Math.floor(200 / msBinHz));
+            const bEnd = Math.min(this.midFreqData.length - 1, Math.ceil(5500 / msBinHz));
+            for (let i = bStart; i <= bEnd; i++) {
+                const fHz = i * msBinHz;
+                const m = this.midFreqData[i] / 255;
+                const s = this.sideFreqData[i] / 255;
+                midTotal += m;
+                sideTotal += s;
+                if (fHz >= 260 && fHz <= 3200) {
+                    midVocal += m;
+                    sideVocal += s;
+                }
+                if (fHz >= 180 && fHz <= 5500) {
+                    midSynth += m;
+                    sideSynth += s;
+                }
+            }
+            const diffRatio = Math.abs(midTotal - sideTotal) / (midTotal + sideTotal + 1e-4);
+            const sideRatio = sideTotal / (midTotal + 1e-4);
+            const isStereoFrame = (diffRatio > 0.08 && sideRatio > 0.04 && sideRatio < 0.92);
+            this.stereoConfidence += ((isStereoFrame ? 1.0 : 0.0) - this.stereoConfidence) * Math.min(1.0, dt * 3.0);
+            this.hasStereo = this.stereoConfidence > 0.35;
+
+            if (this.stereoConfidence > 0.05) {
+                const vMidDom = midVocal / (midVocal + sideVocal + 1e-4);
+                const sSideDom = sideSynth / (midSynth + sideSynth + 1e-4);
+                vocalMidWeight = 1.0 + this.stereoConfidence * ((vMidDom - 0.5) * 1.1);
+                synthSideWeight = 1.0 + this.stereoConfidence * ((sSideDom - 0.25) * 1.6);
+                vocalMidWeight = Math.max(0.45, Math.min(1.5, vocalMidWeight));
+                synthSideWeight = Math.max(0.45, Math.min(1.5, synthSideWeight));
+            }
+        }
+
+        // Aggregate 5 stems from HPSS + frequency masks + Mid/Side bias
+        let kickPerc = 0, kickCnt = 0;
+        let snarePerc = 0, snareCnt = 0;
+        let hatPerc = 0, hatCnt = 0;
+        let bassAcc = 0, bassCnt = 0;
+        let vocalAcc = 0, vocalCnt = 0;
+        let synthAcc = 0, synthCnt = 0;
+        let airAcc = 0, airCnt = 0;
+
+        for (let b = 0; b < nBands; b++) {
+            const fc = ranges[b].fc;
+            const Eb = this._hpssCurrent[b];
+            const Pb = this._hpssPerc[b];
+            const Hb = this._hpssHarm[b];
+
+            if (fc >= 40 && fc <= 160) { kickPerc += Pb; kickCnt++; }
+            if (fc >= 180 && fc <= 2400) { snarePerc += Pb; snareCnt++; }
+            if (fc >= 3000 && fc <= 11000) { hatPerc += Pb; hatCnt++; }
+
+            if (fc >= 25 && fc <= 220) {
+                bassAcc += 0.65 * Hb + 0.35 * Eb;
+                bassCnt++;
+            }
+
+            if (fc >= 260 && fc <= 3200) {
+                const f0 = Math.max(0, b - 4);
+                const f1 = Math.min(nBands - 1, b + 4);
+                let localH = 0;
+                for (let j = f0; j <= f1; j++) localH += this._hpssHarm[j];
+                localH /= (f1 - f0 + 1);
+                const formantProm = Math.max(0, Hb - 0.75 * localH);
+                vocalAcc += (formantProm * 1.85 + Hb * 0.42);
+                vocalCnt++;
+            }
+
+            if (fc >= 180 && fc <= 5500) {
+                // Warm harmonic body + chordal upper partials outside center vocal peaks
+                const upperBoost = (fc > 1800) ? 1.25 : 0.85;
+                synthAcc += Hb * upperBoost;
+                synthCnt++;
+            }
+
+            if (fc >= 4500 && fc <= 16000) {
+                airAcc += 0.55 * Eb + 0.45 * Pb;
+                airCnt++;
+            }
+        }
+
+        const rawDrums = Math.min(1.0, (
+            (kickCnt ? kickPerc / kickCnt : 0) * 1.45 +
+            (snareCnt ? snarePerc / snareCnt : 0) * 1.25 +
+            (hatCnt ? hatPerc / hatCnt : 0) * 0.90 +
+            Math.max(0, this.spectralFlux - 0.08) * 0.45
+        ));
+        const rawBass = Math.min(1.0, (bassCnt ? bassAcc / bassCnt : 0) * 1.15);
+        const rawVocals = Math.min(1.0, (vocalCnt ? vocalAcc / vocalCnt : 0) * 1.30 * vocalMidWeight);
+        const rawSynths = Math.min(1.0, (synthCnt ? synthAcc / synthCnt : 0) * 1.25 * synthSideWeight);
+        const rawAir = Math.min(1.0, (airCnt ? airAcc / airCnt : 0) * 1.35);
+
+        const s = this.stems;
+        s.drums = this._smoothStem(s.drums, rawDrums, 0.82, 0.28);
+        s.bass = this._smoothStem(s.bass, rawBass, 0.72, 0.22);
+        s.vocals = this._smoothStem(s.vocals, rawVocals, 0.65, 0.22);
+        s.synths = this._smoothStem(s.synths, rawSynths, 0.60, 0.20);
+        s.air = this._smoothStem(s.air, rawAir, 0.76, 0.26);
+
+        s.low = this._smoothStem(s.low, rawLow, 0.78, 0.26);
+        s.mid = this._smoothStem(s.mid, rawMid, 0.74, 0.24);
+        s.high = this._smoothStem(s.high, rawHigh, 0.78, 0.26);
+        s.composite = this._smoothStem(s.composite, rawComposite, 0.82, 0.28);
+        s.detail = this._smoothStem(s.detail, rawDetail, 0.75, 0.25);
+    }
+
+    _updateSimStems(dt, beatPos, beatSubPhase, beatFreq) {
+        const t = this.simTime;
+        const beatIdx = Math.floor(beatPos);
+        const sixteenth = (beatPos * 4) % 1.0;
+        const step16 = Math.floor(beatPos * 4) % 16;
+        const barIdx = Math.floor(beatPos / 4);
+        const beatInBar = beatPos % 4;
+        const offHat = Math.pow(Math.max(0, 1 - ((beatSubPhase + 0.5) % 1.0)), 4.5);
+
+        // Bassline 16th groove table & vocal phrase contour
+        const bassPattern = [0.22, 0.40, 0.88, 0.58, 0.26, 0.48, 0.92, 0.68, 0.22, 0.45, 0.96, 0.62, 0.30, 0.76, 0.86, 0.46];
+        const synthArpPattern = [0.78, 0.18, 0.52, 0.90, 0.25, 0.72, 0.38, 0.85, 0.65, 0.22, 0.80, 0.42, 0.30, 0.88, 0.55, 0.35];
+
+        let rawDrums = 0, rawBass = 0, rawVocals = 0, rawSynths = 0, rawAir = 0;
+
+        if (beatPos < 32) {
+            // GROOVE
+            const kick = Math.pow(Math.max(0, 1 - beatSubPhase), 4.0);
+            const snare = (beatIdx % 2 === 1) ? Math.pow(Math.max(0, 1 - beatSubPhase), 3.0) * 0.82 : 0;
+            rawDrums = Math.min(1.0, kick * 0.72 + snare * 0.55 + offHat * 0.32);
+
+            const bassGate = Math.pow(Math.max(0, 1 - sixteenth), 1.35);
+            rawBass = Math.min(1.0, bassPattern[step16] * (0.45 + 0.55 * bassGate) * 0.90 + kick * 0.25);
+
+            // Phrased vocals: sing bars 0, 1 and 3 of each 4-bar group, breathe in bar 2
+            const barMod = barIdx % 4;
+            const phraseActive = (barMod !== 2);
+            const wordEnv = 0.5 + 0.5 * Math.sin(beatInBar * Math.PI * 1.5);
+            const vibrato = 0.85 + 0.15 * Math.sin(t * 28.0);
+            rawVocals = phraseActive ? Math.min(1.0, (0.35 + 0.52 * wordEnv) * vibrato * Math.sin(Math.min(1, beatInBar / 3.8) * Math.PI)) : 0.08;
+
+            const arpGate = Math.pow(Math.max(0, 1 - sixteenth), 1.8);
+            rawSynths = synthArpPattern[step16] * (0.35 + 0.65 * arpGate) * 0.78;
+
+            const downCrash = (barIdx % 4 === 0 && beatInBar < 2.5) ? Math.exp(-beatInBar * 1.6) * 0.55 : 0;
+            rawAir = Math.min(1.0, offHat * 0.72 + downCrash + 0.08);
+        } else if (beatPos < 48) {
+            // BREAKDOWN: drums & bass drop out; soaring vocals, lush synths & atmospheric air shimmer
+            const prog = (beatPos - 32) / 16;
+            rawDrums = 0.04;
+            rawBass = 0.06;
+            const swell = 0.55 + 0.38 * Math.sin(beatPos * Math.PI * 0.5);
+            const vibrato = 0.86 + 0.14 * Math.sin(t * 26.0);
+            rawVocals = Math.min(1.0, swell * vibrato * (0.65 + 0.35 * Math.sin(t * 1.4)));
+            rawSynths = Math.min(1.0, (0.48 + 0.34 * Math.sin(t * 1.8) + 0.18 * synthArpPattern[step16]) * (0.75 + 0.25 * prog));
+            rawAir = Math.min(1.0, 0.22 + 0.28 * Math.sin(beatPos * Math.PI * 0.25) + prog * 0.25);
+        } else if (beatPos < 63) {
+            // BUILDUP: accelerating snare roll, rising synth chord + sweep riser
+            const prog = (beatPos - 48) / 15;
+            let rollRate = 1.0;
+            if (beatPos >= 52 && beatPos < 56) rollRate = 2.0;
+            else if (beatPos >= 56 && beatPos < 60) rollRate = 4.0;
+            else if (beatPos >= 60) rollRate = 8.0;
+            const snareEnv = Math.pow(Math.max(0, 1 - ((t * beatFreq * rollRate) % 1.0)), 2.6);
+
+            rawDrums = Math.min(1.0, snareEnv * (0.55 + 0.45 * prog));
+            rawBass = 0.08 + 0.12 * prog;
+            rawVocals = Math.max(0.12, (1.0 - prog * 0.55) * (0.45 + 0.4 * Math.sin(t * 3.1)));
+            rawSynths = Math.min(1.0, 0.35 + prog * 0.58 + snareEnv * 0.15);
+            rawAir = Math.min(1.0, 0.20 + Math.pow(prog, 1.4) * 0.80);
+        } else if (beatPos < 64) {
+            // PRE-DROP VACUUM
+            rawDrums = 0.02;
+            rawBass = 0.02;
+            rawVocals = 0.14;
+            rawSynths = 0.06;
+            rawAir = 0.12;
+        } else {
+            // DROP: massive kick/sub + heavy bassline + drop synths + crash
+            const dropBeat = beatPos - 64;
+            const kick = Math.pow(Math.max(0, 1 - beatSubPhase), 2.8);
+            const snare = (beatIdx % 2 === 1) ? Math.pow(Math.max(0, 1 - beatSubPhase), 2.5) * 0.95 : 0;
+            rawDrums = Math.min(1.0, kick * 0.85 + snare * 0.65 + offHat * 0.42);
+
+            const bassGate = Math.pow(Math.max(0, 1 - sixteenth), 1.2);
+            rawBass = Math.min(1.0, kick * 0.45 + bassPattern[step16] * (0.55 + 0.45 * bassGate) * 0.95);
+
+            const barMod = Math.floor(dropBeat / 4) % 2;
+            rawVocals = (barMod === 1) ? Math.min(1.0, 0.42 + 0.40 * Math.abs(Math.sin(beatInBar * Math.PI * 0.75))) : 0.18;
+
+            const stab = (step16 % 3 === 0) ? 0.95 : synthArpPattern[step16];
+            rawSynths = Math.min(1.0, stab * (0.55 + 0.45 * Math.pow(1 - sixteenth, 1.5)));
+
+            const crash = Math.exp(-dropBeat * 0.45) * 0.85;
+            rawAir = Math.min(1.0, offHat * 0.80 + crash + 0.15);
+        }
+
+        const scale = Math.min(1.8, Math.max(0.2, this.sensitivity));
+        rawDrums = Math.min(1.0, rawDrums * scale);
+        rawBass = Math.min(1.0, rawBass * scale);
+        rawVocals = Math.min(1.0, rawVocals * scale);
+        rawSynths = Math.min(1.0, rawSynths * scale);
+        rawAir = Math.min(1.0, rawAir * scale);
+
+        const s = this.stems;
+        s.drums = this._smoothStem(s.drums, rawDrums, 0.85, 0.34);
+        s.bass = this._smoothStem(s.bass, rawBass, 0.82, 0.30);
+        s.vocals = this._smoothStem(s.vocals, rawVocals, 0.75, 0.28);
+        s.synths = this._smoothStem(s.synths, rawSynths, 0.78, 0.30);
+        s.air = this._smoothStem(s.air, rawAir, 0.84, 0.34);
+
+        const rawLow = Math.min(1.0, s.bass * 0.72 + s.drums * 0.42);
+        const rawMid = Math.min(1.0, Math.max(s.vocals, s.synths) * 0.65 + (s.vocals + s.synths) * 0.28 + s.drums * 0.22);
+        const rawHigh = Math.min(1.0, s.air * 0.78 + s.drums * 0.28 + s.synths * 0.18);
+        const rawComp = Math.min(1.0, rawLow * 0.42 + rawMid * 0.38 + rawHigh * 0.28);
+        const rawDet = Math.min(1.0, s.air * 0.65 + s.drums * 0.35);
+
+        s.low = rawLow;
+        s.mid = rawMid;
+        s.high = rawHigh;
+        s.composite = rawComp;
+        s.detail = rawDet;
+    }
+
     update(dt = 0.016) {
         this.timeSinceLastBeat += dt;
         this.isBeat = false;
         this.dropDetected = false;
 
-        // Track beat phase from BPM
+        // Track continuous beat count & beat phase from BPM
         const beatInterval = 60 / Math.max(40, this.bpm);
-        this.beatPhase = (this.beatPhase + dt / beatInterval) % 1.0;
 
         if (this.isListening && this.analyser) {
+            this.totalBeats += dt / beatInterval;
+            this.beatPhase = this.totalBeats % 1.0;
+
             this.analyser.getByteFrequencyData(this.frequencyData);
             this.analyser.getByteTimeDomainData(this.timeDomainData);
 
@@ -333,8 +808,9 @@ class AudioEngine {
             this.onsetHistory = this.onsetHistory.filter(t => nowTs - t < 2000);
             this.onsetDensity = this.onsetHistory.length / 2.0;
 
-            // 6. Real-Time Musical Structure State Machine
+            // 6. Real-Time Musical Structure State Machine & Stem Extraction
             this.updateMusicalState(dt);
+            this._updateLiveStems(dt);
 
         } else if (this.useSimulation) {
             // Simulated 80-beat EDM cycle:
@@ -342,6 +818,9 @@ class AudioEngine {
             this.simTime += dt;
             const beatFreq = this.bpm / 60; // beats per sec
             const totalBeatsInCycle = 80;
+            this.totalBeats = this.simTime * beatFreq + this._simBarOffset;
+            this.beatPhase = ((this.totalBeats % 1.0) + 1.0) % 1.0;
+
             const beatPos = (this.simTime * beatFreq) % totalBeatsInCycle;
             const beatSubPhase = (this.simTime * beatFreq) % 1.0;
 
@@ -461,6 +940,8 @@ class AudioEngine {
                     this.beatCallbacks.forEach(cb => cb(1.0));
                 }
             }
+
+            this._updateSimStems(dt, beatPos, beatSubPhase, beatFreq);
         }
     }
 
