@@ -107,16 +107,23 @@ class AudioEngine {
         this._hpssFrames = 11;
         this._byteToAmpLut = new Float32Array(256);
         for (let i = 1; i < 256; i++) {
-            this._byteToAmpLut[i] = Math.pow(10, (i / 255 - 1.0) * 3.5);
+            this._byteToAmpLut[i] = Math.pow(10, (i / 255 - 1.0) * 4.25);
         }
         this._hpssHistory = new Float32Array(this._hpssBands * this._hpssFrames);
         this._hpssWriteIdx = 0;
         this._hpssFilled = 0;
         this._hpssBandRanges = null;
+        this._lowBandIndices = [];
+        this._loMidBandIndices = [];
+        this._mid1BandIndices = [];
+        this._hiBandIndices = [];
         this._vocBandIndices = [];
+        this._hiVocBandIndices = [];
         this._f1BandIndices = [];
         this._f2BandIndices = [];
+        this._log2BandHz = new Float32Array(this._hpssBands);
         this._linBandTmp = new Float32Array(this._hpssBands);
+        this._eqLinBand = new Float32Array(this._hpssBands);
         this._rawFftBand = new Float32Array(this._hpssBands);
         this._hpssCurrent = new Float32Array(this._hpssBands);
         this._hpssPrev = new Float32Array(this._hpssBands);
@@ -129,7 +136,14 @@ class AudioEngine {
         this._hpssMod = new Float32Array(this._hpssBands);
         this._bandMidDom = new Float32Array(this._hpssBands);
         this._hpssSortTmp = new Float32Array(this._hpssFrames);
-        this._stemAgcRef = 0.012;
+        this._f2Hist = new Float32Array(22);
+        this._f2HistIdx = 0;
+        this._f2HistFilled = 0;
+        this._agcLow = 0.0015;
+        this._agcMid = 0.0015;
+        this._loShelfDb = 0;
+        this._shelfInited = false;
+        this._stemAgcRef = 0.0015;
         this._prevKickE = 0;
         this._slowKickE = 0;
         this._prevBodyE = 0;
@@ -188,12 +202,23 @@ class AudioEngine {
             ranges[b] = { sBin, eBin, msSBin, msEBin, fc: Math.sqrt(f0 * f1) };
         }
         this._hpssBandRanges = ranges;
+        this._lowBandIndices = [];
+        this._loMidBandIndices = [];
+        this._mid1BandIndices = [];
+        this._hiBandIndices = [];
         this._vocBandIndices = [];
+        this._hiVocBandIndices = [];
         this._f1BandIndices = [];
         this._f2BandIndices = [];
         for (let b = 0; b < this._hpssBands; b++) {
             const fc = ranges[b].fc;
+            this._log2BandHz[b] = Math.log2(fc);
+            if (fc >= 40 && fc < 230) this._lowBandIndices.push(b);
+            if (fc >= 260 && fc < 560) this._loMidBandIndices.push(b);
+            if (fc >= 560 && fc < 1100) this._mid1BandIndices.push(b);
+            if (fc >= 3800 && fc <= 12000) this._hiBandIndices.push(b);
             if (fc >= 320 && fc <= 3500) this._vocBandIndices.push(b);
+            if (fc >= 700 && fc <= 3500) this._hiVocBandIndices.push(b);
             if (fc >= 320 && fc < 920) this._f1BandIndices.push(b);
             if (fc >= 920 && fc <= 2800) this._f2BandIndices.push(b);
         }
@@ -213,6 +238,8 @@ class AudioEngine {
             this.stemAnalyser = this.audioCtx.createAnalyser();
             this.stemAnalyser.fftSize = this.stemFftSize;
             this.stemAnalyser.smoothingTimeConstant = 0.06;
+            this.stemAnalyser.minDecibels = -100;
+            this.stemAnalyser.maxDecibels = -15;
             this.stemFreqData = new Uint8Array(this.stemAnalyser.frequencyBinCount);
             this.stemTimeData = new Uint8Array(this.stemAnalyser.fftSize);
 
@@ -229,9 +256,13 @@ class AudioEngine {
             this.analyserMid = this.audioCtx.createAnalyser();
             this.analyserMid.fftSize = 512;
             this.analyserMid.smoothingTimeConstant = 0.25;
+            this.analyserMid.minDecibels = -100;
+            this.analyserMid.maxDecibels = -15;
             this.analyserSide = this.audioCtx.createAnalyser();
             this.analyserSide.fftSize = 512;
             this.analyserSide.smoothingTimeConstant = 0.25;
+            this.analyserSide.minDecibels = -100;
+            this.analyserSide.maxDecibels = -15;
             this.midFreqData = new Uint8Array(this.analyserMid.frequencyBinCount);
             this.sideFreqData = new Uint8Array(this.analyserSide.frequencyBinCount);
 
@@ -453,6 +484,16 @@ class AudioEngine {
         return target > prev ? prev + (target - prev) * attack : prev + (target - prev) * decay;
     }
 
+    _bandRms(arr, idxs) {
+        if (!idxs || !idxs.length) return 0;
+        let s = 0;
+        for (let i = 0; i < idxs.length; i++) {
+            const v = arr[idxs[i]];
+            s += v * v;
+        }
+        return Math.sqrt(s / idxs.length);
+    }
+
     _harmCosDist(harm2Arr, histFrameIdx, idxs) {
         let dot = 0, na = 0, nb = 0;
         const off = histFrameIdx * this._hpssBands;
@@ -514,20 +555,21 @@ class AudioEngine {
                 if (v > bPeak) bPeak = v;
             }
             const bRms = Math.sqrt(bSq / count);
-            return Math.min(1.0, (bRms * 0.72 + bPeak * 0.28) * this.sensitivity);
+            return Math.min(1.0, (bRms * 0.72 + bPeak * 0.28) * 1.15 * this.sensitivity);
         };
 
         const rawLow = getCrispBand(20, 250);
         const rawMid = getCrispBand(250, 2500);
         const rawHigh = getCrispBand(2500, Math.min(14000, sampleRate * 0.45));
 
-        // 1. Decompress 64 log bands from Web Audio dB bytes into linear amplitude + adaptive AGC
+        // 1. Decompress 64 log bands from Web Audio dB bytes into linear amplitude,
+        // apply adaptive room/subwoofer baffle EQ, and normalize with subwoofer-decoupled AGC
         const lut = this._byteToAmpLut;
         const linBand = this._linBandTmp;
+        const eqLin = this._eqLinBand;
         const rawBand = this._rawFftBand;
         const nBands = this._hpssBands;
         const ranges = this._hpssBandRanges;
-        let eSq = 0, eCnt = 0;
         for (let b = 0; b < nBands; b++) {
             const r = ranges[b];
             let lSq = 0, lPeak = 0;
@@ -542,27 +584,89 @@ class AudioEngine {
                 lSq += amp * amp;
                 if (amp > lPeak) lPeak = amp;
             }
-            const lVal = Math.sqrt(lSq / count) * 0.7 + lPeak * 0.3;
-            linBand[b] = lVal;
+            linBand[b] = Math.sqrt(lSq / count) * 0.7 + lPeak * 0.3;
             rawBand[b] = Math.sqrt(bSq / count) * 0.7 + bPeak * 0.3;
-            if (r.fc >= 55 && r.fc <= 8000) {
-                eSq += lVal * lVal;
-                eCnt++;
+        }
+
+        const rLow = this._bandRms(linBand, this._lowBandIndices);
+        const rLoMid = this._bandRms(linBand, this._loMidBandIndices);
+        const rMid1 = this._bandRms(linBand, this._mid1BandIndices);
+        const rHigh = this._bandRms(linBand, this._hiBandIndices);
+
+        // Gain-invariant room/subwoofer baffle shelf calibration (260-560 Hz vs 560-1100 Hz)
+        if (rLoMid > 0.0005 && rMid1 > 0.0003) {
+            let targetShelf = 0;
+            if (rLow > rMid1 * 3.0) {
+                const lmDiffDb = 20 * Math.log10((rLoMid + 1e-7) / (rMid1 + 1e-7));
+                targetShelf = Math.max(0, Math.min(10.8, (lmDiffDb - 6.5) * 1.55));
+            }
+            const rate = !this._shelfInited
+                ? Math.min(1.0, dt * 1.4)
+                : Math.min(1.0, dt * (targetShelf > this._loShelfDb ? 0.24 : 0.10));
+            this._loShelfDb += (targetShelf - this._loShelfDb) * rate;
+            if (this._hpssFilled >= 10) this._shelfInited = true;
+        } else if (rLow < 0.0002 && rLoMid < 0.0002 && rMid1 < 0.0002) {
+            this._loShelfDb *= Math.exp(-dt * 0.4);
+        }
+
+        const shelfDb = this._loShelfDb;
+        const hiTiltPerOct = shelfDb * 0.69;
+        const log2_360 = 8.491853096329675; // Math.log2(360)
+        const log2_720 = 9.491853096329675; // Math.log2(720)
+        let midSq = 0, midCnt = 0;
+        for (let b = 0; b < nBands; b++) {
+            const fc = ranges[b].fc;
+            if (fc < 230) {
+                eqLin[b] = linBand[b];
+            } else {
+                const l2 = this._log2BandHz[b];
+                const eqDb = (l2 < log2_720)
+                    ? (-shelfDb * Math.max(0, Math.min(1, (log2_720 - l2) / (log2_720 - log2_360))))
+                    : Math.min(22.0, hiTiltPerOct * (l2 - log2_720));
+                const v = linBand[b] * Math.pow(10, eqDb / 20);
+                eqLin[b] = v;
+                if (fc >= 280 && fc <= 8000) {
+                    midSq += v * v;
+                    midCnt++;
+                }
             }
         }
 
-        const frameRms = Math.sqrt(eSq / Math.max(1, eCnt));
-        const sigPres = Math.min(1.0, Math.max(0.0, (frameRms - 0.0018) / 0.0055));
-        const agcRate = (frameRms > this._stemAgcRef) ? Math.min(1.0, dt * 3.2) : Math.min(1.0, dt * 0.45);
-        this._stemAgcRef = Math.max(0.004, this._stemAgcRef + (frameRms - this._stemAgcRef) * agcRate);
+        const midRms = Math.sqrt(midSq / Math.max(1, midCnt));
+        const sigLow = Math.min(1.0, Math.max(0.0, (rLow - 0.00032) / 0.0010));
+        const sigMid = Math.min(1.0, Math.max(0.0, (midRms - 0.00025) / 0.00085));
+        const hatRawGate = Math.min(1.0, Math.max(0.0, (rHigh - 0.00009) / 0.00022));
+
+        const lowRate = (rLow > this._agcLow) ? Math.min(1.0, dt * 3.2) : Math.min(1.0, dt * 0.45);
+        this._agcLow = Math.max(0.0007, this._agcLow + (rLow - this._agcLow) * lowRate);
+        const midRate = (midRms > this._agcMid) ? Math.min(1.0, dt * 3.2) : Math.min(1.0, dt * 0.45);
+        this._agcMid = Math.max(0.0007, this._agcMid + (midRms - this._agcMid) * midRate);
+
+        const bassExcess = Math.min(1.0, Math.max(0.0, (20 * Math.log10((this._agcLow + 1e-7) / (this._agcMid + 1e-7)) - 9.0) / 8.0));
+        const subMode = Math.max(Math.min(1.0, Math.max(0.0, (shelfDb - 1.5) / 3.5)), bassExcess);
+        const effAgcLow = Math.max(this._agcLow, this._agcMid * 0.65);
+        const coupledRef = Math.sqrt(this._agcMid * this._agcMid * 0.65 + this._agcLow * this._agcLow * 0.35);
+        const effAgcMid = coupledRef * (1.0 - subMode) + this._agcMid * subMode;
+        this._stemAgcRef = effAgcMid;
 
         let risingBands = 0, midWideBandCount = 0;
         for (let b = 0; b < nBands; b++) {
-            const val = Math.min(5.0, (linBand[b] / (this._stemAgcRef + 1e-6)) * sigPres);
+            const fc = ranges[b].fc;
+            let val;
+            if (fc < 200) {
+                val = Math.min(5.0, (eqLin[b] / (effAgcLow + 1e-6)) * sigLow);
+            } else if (fc < 280) {
+                const u = (fc - 200) / 80;
+                const ref = effAgcLow * (1.0 - u) + effAgcMid * u;
+                const pres = sigLow * (1.0 - u) + sigMid * u;
+                val = Math.min(5.0, (eqLin[b] / (ref + 1e-6)) * pres);
+            } else {
+                val = Math.min(5.0, (eqLin[b] / (effAgcMid + 1e-6)) * sigMid);
+            }
             this._hpssCurrent[b] = val;
             const flx = Math.max(0, val - this._hpssPrev[b]);
             this._hpssFlux[b] = flx;
-            if (ranges[b].fc >= 120 && ranges[b].fc <= 7500) {
+            if (fc >= 120 && fc <= 7500) {
                 midWideBandCount++;
                 if (flx > 0.12 && val > 0.20) risingBands++;
             }
@@ -659,7 +763,7 @@ class AudioEngine {
                     mE += lut[this.midFreqData[k]];
                     sE += lut[this.sideFreqData[k]];
                 }
-                this._bandMidDom[b] = (mE + sE > 1e-5) ? (mE / (mE + sE + 1e-6)) : 0.5;
+                this._bandMidDom[b] = (mE + sE > 1e-6) ? (mE / (mE + sE + 1e-7)) : 0.5;
             }
         } else {
             this.stereoConfidence *= Math.exp(-dt * 4.0);
@@ -728,7 +832,7 @@ class AudioEngine {
         this._prevSnapE = this._prevSnapE * 0.38 + snapE * 0.62;
         this._slowSnapE = this._slowSnapE * 0.90 + snapE * 0.10;
 
-        // 5. Vocal Formant-Balance (F2/F1) + Eroded Timbre Morphing + Flatness Rejection vs Synths
+        // 5. Vocal Formant-Balance (F2/F1) + High-Voc Timbre Morphing + Syllable Modulation (f2CV)
         let f1E = 0, f2E = 0;
         const f1Ids = this._f1BandIndices;
         const f2Ids = this._f2BandIndices;
@@ -738,14 +842,29 @@ class AudioEngine {
         f2E /= Math.max(1, f2Ids.length);
         const f2OverF1 = f2E / (f1E + 0.08);
 
+        this._f2Hist[this._f2HistIdx] = f2E;
+        this._f2HistIdx = (this._f2HistIdx + 1) % 22;
+        if (this._f2HistFilled < 22) this._f2HistFilled++;
+        let f2Mean = 0;
+        for (let i = 0; i < this._f2HistFilled; i++) f2Mean += this._f2Hist[i];
+        f2Mean /= this._f2HistFilled;
+        let f2Var = 0;
+        for (let i = 0; i < this._f2HistFilled; i++) {
+            const df = this._f2Hist[i] - f2Mean;
+            f2Var += df * df;
+        }
+        const f2CV = Math.sqrt(f2Var / this._f2HistFilled) / (f2Mean + 0.06);
+
         let d4 = 0, d8 = 0;
-        if (filled >= 5) d4 = this._harmCosDist(harm2Arr, (justWrittenIdx - 4 + nFrames * 2) % nFrames, this._vocBandIndices);
-        if (filled >= 9) d8 = this._harmCosDist(harm2Arr, (justWrittenIdx - 8 + nFrames * 2) % nFrames, this._vocBandIndices);
-        const timbreMorph = Math.min(1.0, Math.max(0.0, (d4 + 0.55 * d8 - 0.05) * 4.8));
-        const f2Presence = Math.min(1.0, Math.max(0.0, (f2OverF1 - 0.34) * 2.2));
+        if (filled >= 5) d4 = this._harmCosDist(harm2Arr, (justWrittenIdx - 4 + nFrames * 2) % nFrames, this._hiVocBandIndices);
+        if (filled >= 9) d8 = this._harmCosDist(harm2Arr, (justWrittenIdx - 8 + nFrames * 2) % nFrames, this._hiVocBandIndices);
+        const timbreMorph = Math.min(1.0, Math.max(0.0, (d4 + 0.55 * d8 - 0.09) * 4.5));
+        const syllableMod = Math.min(1.0, Math.max(0.0, (f2CV - 0.16) * 4.2));
+        const articulation = Math.max(timbreMorph, syllableMod);
+        const f2Presence = Math.min(1.0, Math.max(0.0, (f2OverF1 - 0.36) * 2.4));
         const flatnessGate = Math.min(1.0, Math.max(0.0, (0.995 - midFlatness) / 0.045));
 
-        const monoVocGateTarget = f2Presence * (0.24 + 0.76 * timbreMorph) * flatnessGate;
+        const monoVocGateTarget = f2Presence * (0.20 + 0.80 * articulation) * flatnessGate;
         this._vocalPresSmooth += (monoVocGateTarget - this._vocalPresSmooth) * Math.min(1.0, dt * 11.0);
         this._vocalGateSmooth = this._vocalPresSmooth;
 
@@ -787,7 +906,7 @@ class AudioEngine {
                     const modScore = Math.min(1.0, Math.max(0.0, (Modb - 0.05) * 3.0));
 
                     const f2Weight = (fc >= 850 && fc <= 3000) ? 1.35 : 0.72;
-                    const sMono = formantBell * f2Weight * (0.48 * promScore + 0.30 * modScore + 0.22 * timbreMorph) * (0.10 + 0.90 * promScore);
+                    const sMono = formantBell * f2Weight * (0.48 * promScore + 0.30 * modScore + 0.22 * articulation) * (0.10 + 0.90 * promScore);
 
                     const stereoCue = Math.min(1.0, Math.max(0.0, (midDom - 0.52) * 4.5));
                     const stereoPen = (midDom < 0.50) ? 0.12 : ((midDom < 0.56) ? (0.12 + 0.88 * (midDom - 0.50) / 0.06) : 1.0);
@@ -831,7 +950,7 @@ class AudioEngine {
         const rawSynths = Math.min(1.0, Math.tanh(synthNorm * 1.05 * gainMul));
         const hatCore = hatCoreCnt ? ((hatCoreSum / hatCoreCnt) * 0.55 + hatCoreMax * 0.45) : 0;
         const hatExt = hatExtCnt ? (hatExtSum / hatExtCnt) : 0;
-        const rawHats = Math.min(1.0, Math.tanh(Math.max(hatCore, hatExt * 1.35) * 2.4 * gainMul));
+        const rawHats = Math.min(1.0, Math.tanh(Math.max(hatCore, hatExt * 1.35) * 2.2 * hatRawGate * gainMul));
 
         const s = this.stems;
         s.drums = this._smoothStem(s.drums, rawDrums, 0.96, 0.28);
@@ -870,8 +989,13 @@ class AudioEngine {
             vocalRatio: f2OverF1,
             vocalGateSmooth: this._vocalPresSmooth,
             timbreMorph,
+            f2CV,
+            articulation,
             midFlatness,
             agcRef: this._stemAgcRef,
+            agcLow: this._agcLow,
+            agcMid: this._agcMid,
+            loShelfDb: this._loShelfDb,
             maxProm,
             meanProm: sumProm / vCnt,
             maxMod,
@@ -1470,7 +1594,7 @@ class AudioEngine {
             const eb = new Array(nB);
             const md = new Array(nB);
             for (let b = 0; b < nB; b++) {
-                eb[b] = Math.round(Math.max(0, Math.min(250, (this._rawFftBand[b] || 0) * this.sensitivity * 200)));
+                eb[b] = Math.round(Math.max(0, Math.min(250, (this._rawFftBand[b] || 0) * 250)));
                 md[b] = Math.round(Math.max(0, Math.min(100, (this._bandMidDom[b] || 0) * 100)));
             }
             frame.eb = eb;
@@ -1581,7 +1705,7 @@ class AudioEngine {
 
                 if (fr.eb) {
                     for (let b = 0; b < this._hpssBands; b++) {
-                        bandSum[b] += (fr.eb[b] || 0) / 200;
+                        bandSum[b] += (fr.eb[b] || 0) / 250;
                     }
                 }
             } else {
@@ -1603,6 +1727,8 @@ class AudioEngine {
                 sampleRate,
                 stemFftSize: this.stemFftSize,
                 stemSmoothing: this.stemAnalyser ? this.stemAnalyser.smoothingTimeConstant : 0.06,
+                stemMinDecibels: this.stemAnalyser ? this.stemAnalyser.minDecibels : -100,
+                stemMaxDecibels: this.stemAnalyser ? this.stemAnalyser.maxDecibels : -15,
                 inputChannelCount: this._inputChannelCount,
                 trackLabel,
                 trackSettings,
@@ -1622,7 +1748,7 @@ class AudioEngine {
                         'meanSustFrac', 'meanVocBandE', 'meanLocalFloor'
                     ],
                     raw: ['rawDrums', 'rawBass', 'rawVocals', 'rawSynths', 'rawHats'],
-                    ebScale: 'value / 200 (clamped 0..1.25)',
+                    ebScale: 'value / 250 (0..1.0 raw FFT [-100..-15 dB])',
                     mdScale: 'value / 100 (0..1.00 mid/(mid+side))'
                 }
             },
